@@ -1,0 +1,18 @@
+# Docker 构建忽略清单：只把运行需要的代码送进镜像
+.git
+.gitignore
+node_modules
+
+# 运行时数据（数据库 / 测试数据 / 附件 / 头像 / 判题缓存）必须挂载卷，不打进镜像
+data
+logs
+*.log
+
+# 编辑器与系统文件
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# 文档类非必需文件（docs 目录要保留，站点会展示）
+README-old.md
