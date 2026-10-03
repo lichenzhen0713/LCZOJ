@@ -146,7 +146,7 @@ else
   echo "  本机访问:   http://localhost:$PORT"
   [ -n "$PUBLIC_IP" ] && echo "  外网访问:   http://$PUBLIC_IP:$PORT"
 fi
-echo "  管理员账号: admin（初始密码随机生成，见 data/admin-password.txt 或上面的启动日志）"
+echo "  管理员账号: admin / admin123（请尽快修改密码）"
 echo ""
 echo "  查看状态: systemctl status lczoj"
 echo "  查看日志: journalctl -u lczoj -f"

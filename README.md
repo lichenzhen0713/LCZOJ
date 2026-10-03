@@ -4,7 +4,7 @@
 > 全部功能基于 Node.js 内置模块实现：**无需 `npm install`、无需编译、无需独立数据库服务**，拷贝即可运行。
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.1.0-blue.svg" alt="Version 2.1.0">
+  <img src="https://img.shields.io/badge/Version-2.0.9-blue.svg" alt="Version 2.0.9">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%E2%89%A522.5-brightgreen" alt="Node.js ≥ 22.5"></a>
   <img src="https://img.shields.io/badge/Dependencies-Zero-orange" alt="零依赖">
@@ -38,7 +38,7 @@
 
 ## 部署方式
 
-四种方式任选其一，部署完成后的管理员账号均为 **admin**，**初始密码在首次启动时随机生成**：启动日志会打印一次，同时写入数据目录下的 `admin-password.txt`，登录后请立即修改密码（也可用环境变量 `OJ_ADMIN_PASSWORD` 预先指定）。
+四种方式任选其一，部署完成后的初始账号均为 **admin / admin123**，登录后请立即修改密码。
 
 | 方式 | 适用场景 | 操作概要 | 参考耗时 |
 | --- | --- | --- | --- |
@@ -117,7 +117,7 @@ docker compose up -d --build    # 等价方式（服务器未安装 Node.js 时�
 
 1. 将项目目录复制到本机（例如 `D:\LCZOJ`）；
 2. 双击 `install.bat`（自动安装 Node.js 与可选评测语言并启动服务）；
-3. 浏览器访问 **http://localhost**，用 **admin** + 启动日志里打印的随机初始密码登录（密码同时保存在 `data/admin-password.txt`）。
+3. 浏览器访问 **http://localhost**，使用 **admin / admin123** 登录。
 
 已安装 Node.js ≥ 22.5 时，也可在项目目录执行 `node server.js`（默认 80 端口，如需修改：`set PORT=8080 && node server.js`）。
 
@@ -252,10 +252,8 @@ node deploy/update.js --help      # 查看全部参数
 | `PORT` | `80` | 服务端口（面板部署通常使用 `3000`） |
 | `OJ_HOST` | `0.0.0.0` | 监听地址；面板反向代理场景建议设为 `127.0.0.1` |
 | `OJ_DATA_DIR` | 项目下 `data/` | 数据目录（数据库、测试数据、附件、头像） |
-| `OJ_ADMIN_PASSWORD` | 随机生成 | 首次初始化时创建的管理员密码；不设置则**随机生成 12 位密码**并写入数据目录的 `admin-password.txt` |
 | `OJ_MAX_JUDGES` | 按 CPU 自适应 | 并行判题数 1~16 |
 | `TZ` | 系统时区 | 页面时间显示，例如 `Asia/Shanghai` |
-| `LCZOJ_PUBLIC_IP` | 自动识别 | 部署脚本输出的访问地址所用公网 IP（自动识别失败时可手动指定） |
 | `OJ_UPDATE_URL` | Gitee（官方仓库） | 版本检查地址（默认 `https://gitee.com/Carter_Zane/LCZOJ/raw/master/package.json`，失败回退 GitHub；多个地址用逗号分隔） |
 | `OJ_UPDATE_ZIP_URL` | Gitee（官方仓库） | 源码包下载地址（默认 Gitee 归档包，失败回退 GitHub；多个地址用逗号分隔） |
 
@@ -297,8 +295,7 @@ public/                前端（原生 SPA，无框架）
 deploy/                部署配套（面板 / Docker / systemd 通用）
   check-env.js         环境自检：Node 版本、端口占用、数据目录权限、各语言编译器
   panel-install.js     面板部署：环境准备、后台启停、生成反向代理配置
-  docker-onekey.js     Docker 一键部署（未安装 Docker 时自动安装，输出公网访问地址）
-  net-info.js          部署脚本共用：公网/内网地址识别、初始管理员密码读取
+  docker-onekey.js     Docker 一键部署（未安装 Docker 时自动安装）
   update.js            命令行一键更新
   reset.js             恢复默认状态：停止服务、清空数据、可选重启（跨平台）
   restart-helper.js    无进程守护时负责拉起新进程
@@ -343,9 +340,8 @@ data/                  运行时数据（自动生成）
 
 ## 版本日志
 
-当前版本 **v2.1.0**（`package.json`、系统设置页、启动日志三处一致）。完整版本线 **v0.1.0 → v0.7.0**（v1.0.0 之前的历代快照，编号按改动大小重新分配）**→ v1.0.0 → v2.1.0** 见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+当前版本 **v2.0.9**（`package.json`、系统设置页、启动日志三处一致）。完整版本线 **v0.1.0 → v2.0.9** 见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
-- **v2.1.0** 部署体验：Docker / 面板脚本改为输出**公网地址**（自动识别，可用 LCZOJ_PUBLIC_IP 指定）并提示安全组放行；**初始管理员密码改为随机生成**（12 位，写入 data/admin-password.txt，可用 OJ_ADMIN_PASSWORD 指定）。评测：SPJ checker 编译结果按源码哈希**长期缓存**，同一 checker 只编译一次。界面：比赛信息卡「我的报名」与「是否计算等级分」拆成两块、「编辑比赛」按钮补图标。其他：编辑用户资料不再进入社区管理页；按快照 update.txt 重写历代版本记录并按改动大小重新编号。
 - **v2.0.9** 修复 Windows 一键部署脚本 install.bat 调用 winget 时使用不存在的 --progress-bar 参数导致编译器全部安装失败的问题（改为 --exact --disable-interactivity），并新增 install.bat --check 干跑模式；题目管理页的「导入题目」入口移至页面右上角。
 - **v2.0.8** 修复 reset 脚本在 Windows 与 Linux 下均无法使用的问题：Windows 端 .bat 内含中文导致 cmd 解析错乱（现改为纯 ASCII 包装脚本），Linux 端脚本不定位项目目录且无法停止被守护的服务；重置逻辑统一重写为跨平台的 deploy/reset.js（按 systemd → PM2 → panel.pid → 端口监听顺序停服、删除失败自动退避重试并列出占用文件、支持 --check/--yes/--start/--daemon）。
 - **v2.0.7** 修复 systemd 部署下后台更新无法重启网站的问题（单元配置 Restart=always 时**无需 root 权限**：程序退出后由 systemd 自动拉起）；题目「导入」入口合并为一个（单题 JSON 与整包 ZIP 同一入口）；《使用说明》与站内功能全面对齐并大幅扩充。

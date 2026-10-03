@@ -144,27 +144,10 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
-# 公网 IP：可用环境变量 LCZOJ_PUBLIC_IP 指定；否则依次查询多个公开源（国内可达性优先），失败则回退内网地址
-# 注意：只接受较短响应（排除 HTML 页面）并严格校验四段 0~255、不允许前导零，避免误取页面里的其它数字
-detect_public_ip() {
-  for u in "https://ip.3322.net" "https://myip.ipip.net" "https://ifconfig.me/ip" "https://ipinfo.io/ip" "https://api.ipify.org" "https://ident.me" "https://4.ipw.cn"; do
-    body="$(curl -fsS --max-time 6 "$u" 2>/dev/null | head -c 200 | tr -d '\r')"
-    [ -n "$body" ] || continue
-    ip="$(printf '%s' "$body" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | awk -F. 'NF==4 && $1<=255 && $2<=255 && $3<=255 && $4<=255 && $1 !~ /^0[0-9]/ && $2 !~ /^0[0-9]/ && $3 !~ /^0[0-9]/ && $4 !~ /^0[0-9]/ {print; exit}')"
-    if [ -n "$ip" ]; then printf '%s' "$ip"; return 0; fi
-  done
-  return 1
-}
-url_of() {
-  if [ "$LCZOJ_PORT" = "80" ]; then printf 'http://%s/' "$1"; else printf 'http://%s:%s/' "$1" "$LCZOJ_PORT"; fi
-}
-PUBLIC_IP="${LCZOJ_PUBLIC_IP:-}"
-[ -n "$PUBLIC_IP" ] || PUBLIC_IP="$(detect_public_ip || true)"
-INTERNAL_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-[ -n "$INTERNAL_IP" ] || INTERNAL_IP="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)"
-
-# 初始管理员密码：首次启动时随机生成，容器内落在数据卷的 admin-password.txt
-ADMIN_PWD="$(docker exec "$CONTAINER" sh -c 'cat /app/data/admin-password.txt 2>/dev/null' 2>/dev/null | sed -n 's/^初始密码：//p' | head -n1)"
+IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[ -n "$IP" ] || IP="服务器IP"
+URL="http://${IP}"
+[ "$LCZOJ_PORT" = "80" ] || URL="http://${IP}:${LCZOJ_PORT}"
 
 echo ""
 echo "=============================================="
@@ -175,20 +158,8 @@ else
   echo "  稍等片刻用浏览器打开，或看日志：docker logs -f ${CONTAINER}"
 fi
 echo "=============================================="
-if [ -n "$PUBLIC_IP" ]; then
-  echo "  公网地址：$(url_of "$PUBLIC_IP")   ← 外网访问用这个"
-else
-  echo "  公网地址：未能自动识别，请用服务器的公网 IP 访问（也可先 export LCZOJ_PUBLIC_IP=你的IP 再重跑本脚本）"
-fi
-[ -n "$INTERNAL_IP" ] && echo "  内网地址：$(url_of "$INTERNAL_IP")   ← 同一局域网内访问用这个"
-echo "  提示：云服务器需在【安全组 / 防火墙】放行 ${LCZOJ_PORT} 端口，否则公网打不开"
-if [ -n "$ADMIN_PWD" ]; then
-  echo "  账号：admin　初始密码：${ADMIN_PWD}　（随机生成，登录后请立刻修改）"
-else
-  echo "  账号：admin　初始密码：首次启动时随机生成，见 docker logs ${CONTAINER}"
-  echo "        （或查看容器内文件：docker exec ${CONTAINER} cat /app/data/admin-password.txt）"
-  echo "        （若数据卷由旧版本创建，则仍为旧默认密码 admin123，请登录后立刻修改）"
-fi
+echo "  网址：${URL}"
+echo "  账号：admin　密码：admin123（登录后请立刻改密码）"
 echo ""
 echo "  常用命令："
 echo "    docker logs -f ${CONTAINER}        看日志"

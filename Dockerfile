@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 # =============================================================================
 #  LCZOJ 在线评测系统 · Docker 镜像
-#  构建：docker build -t lczoj:2.1.0 .
-#  运行：docker run -d --name lczoj -p 8080:80 -v lczoj-data:/app/data lczoj:2.1.0
+#  构建：docker build -t lczoj:2.0.9 .
+#  运行：docker run -d --name lczoj -p 8080:80 -v lczoj-data:/app/data lczoj:2.0.9
 #  说明：应用本身零外部依赖（不需要 npm install），镜像里预装的是**评测语言工具链**。
 #       精简镜像（只保留 Python / JavaScript / PHP）：docker build --build-arg WITH_TOOLCHAINS=0 .
 # =============================================================================
@@ -21,7 +21,7 @@ ARG WITH_TOOLCHAINS=1
 
 LABEL org.opencontainers.image.title="LCZOJ" \
       org.opencontainers.image.description="零依赖在线评测系统（Node.js 内置模块实现）" \
-      org.opencontainers.image.version="2.1.0" \
+      org.opencontainers.image.version="2.0.9" \
       org.opencontainers.image.licenses="MIT"
 
 # 站点运行参数：容器内默认监听 80，映射到宿主机用 -p 8080:80

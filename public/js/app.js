@@ -5305,19 +5305,9 @@ async function renderContestDetail(id, query) {
     </div>` : '';
 
   // 右侧栏：报名状态与报名操作
-  // 「已报名」与「是否计算等级分」分成两块（两行）展示，避免挤在同一个徽章里
   const signupBadge = c.signed_up
-    ? '<span class="badge" style="background:var(--green);color:#fff">已报名 <i class="fa-solid fa-check"></i></span>'
+    ? `<span class="badge" style="background:var(--green);color:#fff">已报名 <i class="fa-solid fa-check" style="color:var(--green)"></i>${c.my_rated === 0 ? ' （不计等级分）' : ' （计算等级分）'}</span>`
     : (c.status === 'ended' ? '<span class="muted">报名已截止</span>' : '<span class="muted">未报名</span>');
-  const ratedChoiceRow = c.signed_up
-    ? `<div class="info-row" style="border-bottom:none"><span class="il">是否计算等级分</span><span class="iv">${
-      !c.rated
-        ? '<span class="badge" style="background:#8c8c8c;color:#fff">Unrated（本场不计等级分）</span>'
-        : (c.my_rated === 0
-          ? '<span class="badge" style="background:#8c8c8c;color:#fff"><i class="fa-solid fa-xmark"></i> 不计等级分</span>'
-          : '<span class="badge" style="background:var(--green);color:#fff"><i class="fa-solid fa-check"></i> 计算等级分</span>')
-    }</span></div>`
-    : '';
   const highRating = c.rated && c.rating_threshold > 0 && Store.user && (Store.user.rating || 0) >= c.rating_threshold;
   const canTickRate = c.rated && !highRating;
   // 阈值比赛：报名/信息区展示「我的等级分是否符合阈值要求」
@@ -5378,8 +5368,7 @@ async function renderContestDetail(id, query) {
                 ? `<div class="info-row"><span class="il">本场等级分</span><span class="iv"><span class="muted">待管理员结算后显示变化</span></span></div>`
                 : ''))
         : ''}
-      <div class="info-row"${ratedChoiceRow ? '' : ' style="border-bottom:none"'}><span class="il">我的报名</span><span class="iv">${signupBadge}</span></div>
-      ${ratedChoiceRow}
+      <div class="info-row" style="border-bottom:none"><span class="il">我的报名</span><span class="iv">${signupBadge}</span></div>
       ${signupAction}
     </div>`;
 
@@ -5393,7 +5382,7 @@ async function renderContestDetail(id, query) {
       ${Store.user ? `<button class="btn btn-ghost btn-sm" id="fav-contest-btn" title="收藏本比赛"><i class="fa-${c.is_favorite ? 'solid' : 'regular'} fa-star" style="color:${c.is_favorite ? '#faad14' : ''}"></i> ${c.is_favorite ? '已收藏' : '收藏'}</button>` : ''}
       ${canSeeAll ? `<a class="btn btn-ghost btn-sm" href="#/submissions?contest=${c.id}">比赛提交记录</a>` : ''}
       ${Store.user && Store.user.is_admin ? `<button class="btn btn-ghost btn-sm" id="dl-standings-btn" title="下载排行榜（CSV）"><i class="fa-solid fa-download"></i> 下载排行榜</button>` : ''}
-      ${Store.user && hasP('contest') ? `<a class="btn btn-ghost btn-sm" href="#/admin/contest/${c.id}"><i class="fa-solid fa-pen"></i> 编辑比赛</a>` : ''}
+      ${Store.user && hasP('contest') ? `<a class="btn btn-ghost btn-sm" href="#/admin/contest/${c.id}">编辑比赛</a>` : ''}
       ${Store.user && hasP('contest') ? '<button class="btn btn-danger btn-sm" id="contest-del-btn"><i class="fa-solid fa-trash"></i> 删除比赛</button>' : ''}
       ${(Store.user && Store.user.is_admin && c.status === 'ended' && c.signup_count > 0) ? `<button class="btn btn-sm" id="apply-rating-btn">${c.ratings_applied ? '重新计算等级分' : '计算等级分'}</button>` : ''}
       ${(canContest && c.status === 'running') ? `<button class="btn btn-ghost btn-sm" id="end-contest-btn">提前结束</button>` : ''}

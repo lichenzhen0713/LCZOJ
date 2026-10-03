@@ -18,7 +18,7 @@
  *     数据库、题库测试数据、附件、头像与判题缓存；程序代码与配置不动。
  *   · 删除前会按 systemd → PM2 → deploy/panel.pid → 端口监听 → server.js 残留进程
  *     的顺序停止服务，避免服务被守护进程重新拉起或数据文件被占用。
- *   · 清空后首次启动会自动重建默认数据：管理员 admin（**初始密码随机生成**，写在 data/admin-password.txt）与 3 道示例题。
+ *   · 清空后首次启动会自动重建默认数据：管理员 admin / admin123 与 3 道示例题。
  */
 
 const fs = require('fs');
@@ -450,8 +450,7 @@ function ask(question) {
     out('  检查完成（--check 模式，未做任何修改）');
     out(`  执行请去掉 --check：node deploy/reset.js${MODE === 'stop' ? '' : ' --' + MODE} --yes`);
   } else {
-    out('  恢复完成。管理员账号：admin');
-    out('  初始密码：下次启动时随机生成，启动日志会显示，并写入 data/admin-password.txt');
+    out('  恢复完成。默认账号：admin / admin123');
     out('  首次启动会自动重建数据库与 3 道示例题（A+B Problem、SPJ 测试题、提交答案测试题）');
   }
   out('============================================================');

@@ -2,32 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
-const { DB_PATH, TESTDATA_DIR, DATA_DIR, ensureDirs } = require('./config');
+const { DB_PATH, TESTDATA_DIR, ensureDirs } = require('./config');
 const { hashPassword } = require('./password');
-
-/** 初始管理员密码落盘位置（仅首次初始化时写入一次，登录后可删除） */
-const ADMIN_PASSWORD_FILE = path.join(DATA_DIR, 'admin-password.txt');
-
-/** 首次初始化结果：{ created, username, password, source:'env'|'random', file } */
-let adminInit = null;
-
-/**
- * 生成随机初始管理员密码：默认 12 位，字符集去掉容易混淆的 0/O/1/l/I。
- * 用 crypto.randomBytes 取随机字节，避免 Math.random 的可预测性。
- */
-function generateAdminPassword(len = 12) {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-  const bytes = crypto.randomBytes(len);
-  let out = '';
-  for (let i = 0; i < len; i++) out += chars[bytes[i] % chars.length];
-  return out;
-}
-
-/** 首次初始化信息（供启动横幅 / 安装脚本显示），未初始化过则为 null */
-function getAdminInitInfo() {
-  return adminInit;
-}
 
 /**
  * 加载 Node.js 内置的 node:sqlite。
@@ -742,35 +718,9 @@ function testcaseCount(problemId) {
 function seed() {
   const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
   if (userCount === 0) {
-    // 初始管理员密码：默认**随机生成**（不再是固定密码），也可用 OJ_ADMIN_PASSWORD 指定（便于自动化部署）
-    const fromEnv = String(process.env.OJ_ADMIN_PASSWORD || '').trim();
-    if (fromEnv && fromEnv.length < 6) {
-      console.error('[LCZOJ] 环境变量 OJ_ADMIN_PASSWORD 太短（至少 6 位），已改为随机生成初始密码。');
-    }
-    const useEnv = fromEnv.length >= 6;
-    const password = useEnv ? fromEnv : generateAdminPassword();
     db.prepare(
       "INSERT INTO users (username, email, password_hash, is_admin, role, permissions, bio, created_at) VALUES (?, ?, ?, 1, 'superadmin', ?, ?, ?)"
-    ).run('admin', 'cz20090521@126.com', hashPassword(password), 'problem,user,editorial_review,article_review,contest,discussion,article,editorial', '系统管理员', Date.now());
-    adminInit = { created: true, username: 'admin', password, source: useEnv ? 'env' : 'random', file: ADMIN_PASSWORD_FILE };
-    // 明文落盘一份，便于用户稍后在服务器上查阅（权限 600，仅属主可读）
-    try {
-      fs.writeFileSync(ADMIN_PASSWORD_FILE, [
-        'LCZOJ 初始管理员账号（首次初始化时写入，登录后请立即修改密码）',
-        '',
-        `用户名：${adminInit.username}`,
-        `初始密码：${password}`,
-        `生成方式：${useEnv ? '由环境变量 OJ_ADMIN_PASSWORD 指定' : '随机生成'}`,
-        `生成时间：${new Date().toISOString()}`,
-        '',
-        '说明：本文件只是「首次登录用的初始密码」记录；登录后请在「系统设置」中修改密码，',
-        '      修改后本文件内容即失效，可以删除。忘记密码时可用 node deploy/reset.js 重置数据后重建。',
-        '',
-      ].join('\n'), { mode: 0o600 });
-      console.log(`[LCZOJ] 已生成初始管理员密码（${useEnv ? '来自 OJ_ADMIN_PASSWORD' : '随机'}），保存在 ${ADMIN_PASSWORD_FILE}`);
-    } catch (e) {
-      console.error('[LCZOJ] 写入初始密码文件失败：' + (e && e.message));
-    }
+    ).run('admin', 'cz20090521@126.com', hashPassword('admin123'), 'problem,user,editorial_review,article_review,contest,discussion,article,editorial', '系统管理员', Date.now());
   } else {
     // 若 admin 已存在但邮箱仍为早期默认值，则更新为用户指定的邮箱（幂等）
     const adm = db.prepare("SELECT id, email FROM users WHERE username = 'admin'").get();
@@ -899,7 +849,6 @@ function nextFreeId(table) {
 
 module.exports = {
   db,
-  getAdminInitInfo,
   nextFreeId,
   writeTestcases,
   readTestcases,

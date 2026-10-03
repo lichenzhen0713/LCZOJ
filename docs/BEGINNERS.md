@@ -31,7 +31,7 @@ curl -fsSL https://gitee.com/Carter_Zane/LCZOJ/raw/master/bootstrap.sh | sudo ba
 5. 放行防火墙 **80 端口**；
 6. 启动网站，并自动显示**外网访问地址**（如 `http://123.45.67.89`）。
 
-**部署完成后**：浏览器打开脚本输出的地址 → 用 **admin** 登录，初始密码是**首次启动时随机生成的**（脚本输出的启动日志里有，也写在数据目录的 `admin-password.txt`），请尽快修改密码。
+**部署完成后**：浏览器打开脚本输出的地址 → 用 **admin / admin123** 登录（请尽快改密码）。
 
 ---
 
@@ -56,7 +56,7 @@ cd /opt/lczoj && sudo ./install.sh --daemon
 
 1. 把整个 LCZOJ 文件夹拷到电脑上（路径不要有中文和空格，如 `D:\LCZOJ`）；
 2. **双击 `install.bat`** —— 自动安装 Node.js（缺失时自动下载）并启动网站；
-3. 浏览器打开 **http://localhost**，用 **admin** + 启动日志里打印的随机初始密码登录。
+3. 浏览器打开 **http://localhost**，登录 **admin / admin123**。
 
 > 闪一下就没了 → 右键「以管理员身份运行」；端口 80 被占用 → `set PORT=8080 && install.bat`，访问 `http://localhost:8080`。
 

@@ -6,7 +6,7 @@
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/Carter_Zane/LCZOJ/main/docker-bootstrap.sh | sudo bash
 > ```
-> 该脚本依次完成：安装基础工具 → 安装并启动 Docker → 下载项目至 `/opt/lczoj` → 构建镜像 → 启动容器 → 等待服务就绪 → 输出**公网访问地址**与初始管理员密码。执行完成后可跳至第 3 节。
+> 该脚本依次完成：安装基础工具 → 安装并启动 Docker → 下载项目至 `/opt/lczoj` → 构建镜像 → 启动容器 → 等待服务就绪 → 输出访问地址。执行完成后可跳至第 3 节。
 
 ---
 
@@ -47,7 +47,7 @@ docker --version
 node deploy/docker-onekey.js
 ```
 
-脚本执行内容：构建镜像 → 选择可用端口（优先 80，被占用时自动改用 8080 并说明原因）→ 启动容器 → 轮询 `/api/health` 直至服务就绪 → 输出**公网地址**、内网地址与账号信息。
+脚本执行内容：构建镜像 → 选择可用端口（优先 80，被占用时自动改用 8080 并说明原因）→ 启动容器 → 轮询 `/api/health` 直至服务就绪 → 输出访问地址与账号信息。
 
 服务器未安装 Node.js 时，可使用等价命令：
 
@@ -55,7 +55,7 @@ node deploy/docker-onekey.js
 docker compose up -d --build
 ```
 
-启动后访问 **`http://服务器公网IP`**（脚本会直接打印公网地址；自动识别失败时用 `LCZOJ_PUBLIC_IP=你的IP` 指定）。若 80 端口已被 Nginx 占用，将 `docker-compose.yml` 中的 `"80:80"` 改为 `"8080:80"`，访问 `http://服务器IP:8080`。
+启动后访问 `http://服务器IP`。若 80 端口已被 Nginx 占用，将 `docker-compose.yml` 中的 `"80:80"` 改为 `"8080:80"`，访问 `http://服务器IP:8080`。
 
 首次构建需 3~10 分钟（下载基础镜像并安装评测语言），期间无输出属正常现象。
 
@@ -63,7 +63,7 @@ docker compose up -d --build
 
 ## 3. 部署后的初始操作
 
-1. 访问站点，用 `admin` + 随机初始密码登录并立即修改密码（初始密码在启动日志里打印，或执行 `docker exec lczoj cat /app/data/admin-password.txt` 查看）；
+1. 访问站点，使用 `admin / admin123` 登录并立即修改密码；
 2. 确认评测语言：管理后台 → 系统设置 → 评测性能，或执行 `node deploy/check-env.js`；
 3. 确认数据位置：所有数据保存在数据卷 `lczoj-data` 中，删除容器不影响数据。
 

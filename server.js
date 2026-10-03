@@ -6,7 +6,7 @@ const path = require('path');
 const { URL } = require('url');
 
 const { PORT, HOST, DATA_DIR, PUBLIC_DIR, DOCS_DIR, VERDICTS, DIFFICULTIES, ensureDirs } = require('./src/config');
-const { db, getAdminInitInfo } = require('./src/db');
+const { db } = require('./src/db');
 const {
   currentUser, createSession, destroySession, registerUser, loginUser, setSessionCookie, clearSessionCookie,
   hasPerm, PERMISSION_LABELS,
@@ -24,7 +24,7 @@ const attachments = require('./src/attachments');
 const notifications = require('./src/notifications');
 const messages = require('./src/messages');
 
-const { JudgeQueue, availableLanguages, cleanJudgeWorkDirs, pruneSpjCache, pruneGoCache } = require('./src/judge');
+const { JudgeQueue, availableLanguages, cleanJudgeWorkDirs, cleanSpjCache, pruneGoCache } = require('./src/judge');
 
 ensureDirs();
 const queue = new JudgeQueue();
@@ -38,8 +38,7 @@ try {
 /**
  * 定期清理评测缓存与临时文件（启动时执行一次，之后每 10 分钟一次）：
  *   1) data/judge 下超过 30 分钟的评测工作目录与散落临时文件（正常评测结束已即时删除，这里处理崩溃残留）
- *   2) data/spj_cache 里 SPJ checker 编译缓存：**只做过期/超量淘汰**（保留最近使用的若干个，不整目录清空），
- *      这样同一道题的 checker 只需编译一次，后续评测直接复用
+ *   2) data/spj_cache 里残留的 checker 编译产物（正常评测结束即时删除）
  *   3) data/gocache 里超过 1 天 / 总量超过 100MB 的 Go 构建缓存
  * 只清理缓存与临时产物；题库测试数据、附件、头像、数据库等数据一律不动。
  */
@@ -50,8 +49,8 @@ function maintainJudgeCaches(label) {
     if (r && r.removed) parts.push(`判题工作目录 ${r.removed} 个/${(r.freedBytes / 1024 / 1024).toFixed(1)}MB`);
   } catch { /* ignore */ }
   try {
-    const s = pruneSpjCache();
-    if (s && s.removed) parts.push(`SPJ 编译缓存淘汰 ${s.removed} 个（保留 ${s.kept} 个）`);
+    const n = cleanSpjCache();
+    if (n) parts.push(`SPJ 编译缓存 ${n} 个`);
   } catch { /* ignore */ }
   try {
     const g = pruneGoCache(100, 1);
@@ -1686,28 +1685,11 @@ server.listen(PORT, HOST, () => {
   const langs = availableLanguages();
   const avail = Object.values(langs).filter((l) => l.available).map((l) => l.name);
   const shown = HOST === '0.0.0.0' || HOST === '::' ? 'localhost' : HOST;
-  const inDocker = fs.existsSync('/.dockerenv') || String(process.env.OJ_IN_DOCKER || '') === '1';
-  const admin = getAdminInitInfo();
   console.log('==============================================');
   console.log(`  LCZOJ 在线评测系统 v${VERSION} 已启动`);
-  console.log(`  监听地址: ${HOST}:${PORT}（本机访问 http://${shown}${PORT === 80 ? '' : ':' + PORT}）`);
-  if (inDocker) {
-    // 容器内的 localhost 对用户没有意义，直接说明该用宿主机的地址
-    console.log('  当前运行在 Docker 容器中：请在浏览器用「宿主机公网 IP」访问，');
-    console.log(`    例如 http://<服务器公网IP>${PORT === 80 ? '' : ':' + PORT}/（端口映射 ${PORT}，云服务器还需在安全组放行）`);
-  }
+  console.log(`  监听地址: ${HOST}:${PORT}（访问 http://${shown}${PORT === 80 ? '' : ':' + PORT}）`);
   console.log(`  数据目录: ${DATA_DIR}`);
-  if (admin && admin.created) {
-    // 首次初始化：把随机生成的初始密码直接打印出来（仅这一次），并告知落盘位置
-    console.log(`  管理员账号: ${admin.username}　初始密码: ${admin.password}`);
-    console.log(`    （${admin.source === 'env' ? '密码来自环境变量 OJ_ADMIN_PASSWORD' : '密码为随机生成，仅在本次启动显示'}；已保存到 ${path.relative(process.cwd(), admin.file) || admin.file}）`);
-    console.log('    请登录后立即在「系统设置」中修改密码。');
-  } else {
-    const pwdFile = path.join(DATA_DIR, 'admin-password.txt');
-    const hasPwdFile = fs.existsSync(pwdFile);
-    console.log('  管理员账号: admin　密码：沿用数据库中已有的密码'
-      + (hasPwdFile ? `（初始密码记录：${path.relative(process.cwd(), pwdFile) || pwdFile}）` : '（若已遗忘，见 docs/FAQ.md 的重置方法）'));
-  }
+  console.log(`  管理员账号: admin / admin123`);
   console.log(`  可用评测语言: ${avail.join(', ') || '(无)'}`);
   console.log(`  健康检查: GET /api/health　环境自检: node deploy/check-env.js`);
   console.log('==============================================');

@@ -230,7 +230,7 @@ if [ "$DAEMON" = "1" ]; then
   echo "  停止服务: pkill -f 'node server.js'"
 else
   echo "  访问地址: http://localhost:$PORT"
-  echo "  管理员账号: admin（首次启动随机生成初始密码，见 data/admin-password.txt 或启动日志）"
+  echo "  管理员账号: admin / admin123（首次启动自动创建，请尽快修改密码）"
   echo "  按 Ctrl+C 停止"
   echo "=============================================="
   PORT="$PORT" node server.js

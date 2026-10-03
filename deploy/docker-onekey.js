@@ -17,7 +17,6 @@ const os = require('os');
 const net = require('net');
 const path = require('path');
 const { spawnSync } = require('node:child_process');
-const { internalIp, publicIp, siteUrl } = require('./net-info');
 
 const ROOT = path.join(__dirname, '..');
 const CONTAINER = 'lczoj';
@@ -71,13 +70,6 @@ function docker(dockerArgs, opts = {}) {
 
 function appVersion() {
   try { return require('../package.json').version || '0.0.0'; } catch { return '0.0.0'; }
-}
-
-/** 读取容器内首次初始化生成的随机管理员密码（数据卷里的 admin-password.txt） */
-function adminPasswordFromContainer() {
-  const r = docker(['exec', CONTAINER, 'sh', '-c', 'cat /app/data/admin-password.txt 2>/dev/null']);
-  const m = String(r.out || '').match(/^初始密码：(.+)$/m);
-  return m ? m[1].trim() : '';
 }
 
 function portFree(port) {
@@ -262,23 +254,8 @@ function installDocker() {
   out('============================================================');
   out('  部署完成！');
   out('============================================================');
-  const pub = await publicIp();
-  const lan = internalIp();
-  if (pub.ip) {
-    out(`  公网地址：${siteUrl(pub.ip, HOST_PORT)}   ← 外网访问用这个（来源：${pub.from}）`);
-  } else {
-    out('  公网地址：未能自动识别，请用服务器公网 IP 访问；也可先设置环境变量 LCZOJ_PUBLIC_IP 再重跑本脚本');
-  }
-  if (lan) out(`  内网地址：${siteUrl(lan, HOST_PORT)}   ← 同一局域网内访问用这个`);
-  out(`  提示：云服务器需在【安全组 / 防火墙】放行 ${HOST_PORT} 端口，否则公网打不开`);
-  const pwd = adminPasswordFromContainer();
-  if (pwd) {
-    out(`  账号：admin　初始密码：${pwd}　（随机生成，登录后请立刻修改）`);
-  } else {
-    out('  账号：admin　初始密码：首次启动时随机生成（看日志：node deploy/docker-onekey.js --logs）');
-    out(`        （或查看容器内文件：docker exec ${CONTAINER} cat /app/data/admin-password.txt）`);
-    out('        （若数据卷由旧版本创建，则仍为旧默认密码 admin123，请登录后立刻修改）');
-  }
+  out(`  网址：http://服务器IP${HOST_PORT === 80 ? '' : ':' + HOST_PORT}/`);
+  out('  账号：admin　密码：admin123（登录后请立刻修改）');
   out('');
   out('  常用命令：');
   out('    node deploy/docker-onekey.js --logs     看日志');

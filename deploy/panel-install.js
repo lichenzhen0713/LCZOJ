@@ -27,7 +27,6 @@ const os = require('os');
 const net = require('net');
 const path = require('path');
 const { spawn, spawnSync } = require('node:child_process');
-const { internalIp, publicIp, initialAdminPassword } = require('./net-info');
 
 const ROOT = path.join(__dirname, '..');
 const isWin = process.platform === 'win32';
@@ -66,6 +65,7 @@ const HOST = argValue('--host', '127.0.0.1');
 const MAX_JUDGES = argValue('--judges', String(Math.max(2, Math.min(4, (os.cpus() || []).length - 1 || 2))));
 const DATA_DIR = path.resolve(ROOT, process.env.OJ_DATA_DIR || 'data');
 
+/* ---------------- 小工具 ---------------- */
 const out = (s = '') => console.log(s);
 const step = (n, total, title) => { out(''); out(`【${n}/${total}】${title}`); };
 const okLine = (s) => out('   ✓ ' + s);
@@ -441,15 +441,8 @@ NODE_ENV=production
   out('     面板站点 → SSL → Let\'s Encrypt 一键申请 → 开启强制 HTTPS');
   out('');
   out('  打开网站');
-  const lan = internalIp();
-  const pub = await publicIp();
-  if (pub) out(`     公网地址：http://${pub}${PORT === 80 ? '' : ':' + PORT}/　← 外网访问用这个（未配置域名时）`);
-  else out(`     公网地址：未能自动识别，请用服务器公网 IP 访问（也可先设置环境变量 LCZOJ_PUBLIC_IP）`);
-  if (lan) out(`     内网地址：http://${lan}${PORT === 80 ? '' : ':' + PORT}/　← 同一局域网内访问`);
-  if (pub || lan) out(`     提示：云服务器需在【安全组 / 防火墙】放行 ${PORT} 端口；用面板 Nginx 反代时把 OJ_HOST 设为 0.0.0.0`);
-  const pwd = initialAdminPassword();
-  if (pwd) out(`     账号 admin　初始密码 ${pwd}（首次启动随机生成，登录后请立刻改密码）`);
-  else out('     账号 admin　初始密码：首次启动时随机生成（见启动日志或 data/admin-password.txt）');
+  out(`     域名尚未配置时，可先用 http://服务器IP:${PORT} 看看（需将 OJ_HOST 设为 0.0.0.0）`);
+  out('     账号 admin　密码 admin123 —— 登录后请立刻改密码');
   out('');
   out('  以后想交给面板守护进程（开机自启 / 面板里看状态）');
   out(`     先停止本脚本启动的进程：node deploy/panel-install.js --stop`);

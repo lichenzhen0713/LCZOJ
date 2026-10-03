@@ -9,8 +9,7 @@
 #
 #  更省事的方式：node deploy/docker-onekey.js（自动选端口、等就绪、打印网址）
 #
-#  启动后打开 http://服务器公网IP/ ，账号 admin；初始密码随机生成，看 docker compose logs 或
-#  容器内 /app/data/admin-password.txt（登录后请立刻改密码）
+#  启动后打开 http://服务器IP/ ，用 admin / admin123 登录（请立刻改密码）
 # =============================================================================
 
 services:
@@ -21,7 +20,7 @@ services:
       # 想构建「精简镜像」（只有 Python / JavaScript / PHP 三种语言）就取消下面两行注释
       # args:
       #   WITH_TOOLCHAINS: "0"
-    image: lczoj:2.1.0
+    image: lczoj:2.0.9
     container_name: lczoj
     restart: unless-stopped
 

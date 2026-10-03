@@ -2,7 +2,7 @@
 
 本文说明 LCZOJ 的部署方式、常驻运行配置、反向代理、HTTPS、备份与版本更新。
 
-四种部署方式的对照如下，可按服务器实际情况选择；部署完成后的管理员账号均为 **admin**，**初始密码在首次启动时随机生成**（启动日志打印一次，并写入数据目录的 `admin-password.txt`；也可用环境变量 `OJ_ADMIN_PASSWORD` 预先指定），登录后请立即修改密码。
+四种部署方式的对照如下，可按服务器实际情况选择；部署完成后的初始账号均为 **admin / admin123**，登录后请立即修改密码。
 
 | 服务器情况 | 推荐方式 | 入口命令 |
 | --- | --- | --- |
@@ -33,9 +33,7 @@ node deploy/check-env.js
 > - 面板上 80/443 已被 Nginx 占用，**本站请用 `PORT=3000` + 站点反向代理**（见 [PANEL.md](PANEL.md)）；
 > - `OJ_HOST=127.0.0.1` 让服务只监听本机，避免别人绕过 Nginx 直接访问端口；
 > - `OJ_DATA_DIR=/绝对/路径` 可把数据目录放到数据盘（默认项目下 `data/`）；
-> - `OJ_MAX_JUDGES=4` 显式指定并行判题数（Docker 里自动探测到的是宿主机核数，建议显式设置）；
-> - `OJ_ADMIN_PASSWORD=你的密码` 可指定初始管理员密码（不设置则**首次启动时随机生成 12 位密码**，写入数据目录的 `admin-password.txt`）；
-> - `LCZOJ_PUBLIC_IP=你的公网IP` 可指定部署脚本输出的访问地址（默认自动识别公网 IP）。
+> - `OJ_MAX_JUDGES=4` 显式指定并行判题数（Docker 里自动探测到的是宿主机核数，建议显式设置）。
 
 ## 2. Linux 服务器部署（推荐）
 
@@ -175,7 +173,7 @@ curl -fsSL https://raw.githubusercontent.com/Carter_Zane/LCZOJ/main/docker-boots
 ```
 
 它会自动装基础工具 → **没装 Docker 就把 Docker 装好并设为开机自启** → 下载项目到 `/opt/lczoj` →
-构建镜像（内含全部评测语言）→ 启动容器 → 等就绪并打印**公网访问地址**（自动识别公网 IP，失败时回退内网地址）与随机生成的初始管理员密码。可用环境变量覆盖：
+构建镜像（内含全部评测语言）→ 启动容器 → 等就绪并打印网址。可用环境变量覆盖：
 `LCZOJ_PORT=8080`、`LCZOJ_DIR=/opt/lczoj`、`LCZOJ_JUDGES=4`。
 
 ### 3.2 项目已在服务器上
@@ -189,9 +187,9 @@ node deploy/docker-onekey.js      # 一键：没装 Docker 会自动装（Linux�
 ```bash
 docker compose up -d --build          # 用仓库自带的 compose（默认映射到 80 端口）
 # 或不用 compose：
-docker build -t lczoj:2.1.0 .
+docker build -t lczoj:2.0.9 .
 docker run -d --name lczoj --restart unless-stopped -p 80:80 \
-  -v lczoj-data:/app/data -e OJ_MAX_JUDGES=4 -e TZ=Asia/Shanghai lczoj:2.1.0
+  -v lczoj-data:/app/data -e OJ_MAX_JUDGES=4 -e TZ=Asia/Shanghai lczoj:2.0.9
 ```
 
 完整说明（备份恢复、换端口、资源限制、HTTPS、镜像内容、安全提示、排错）见 [DOCKER.md](DOCKER.md)。

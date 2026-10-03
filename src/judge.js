@@ -496,19 +496,12 @@ function compile(lang, dir, srcFile, o2 = true) {
 /** 编译 Special Judge checker（testlib 风格，洛谷参数：g++ -fno-asm -std=c++14 -O2）
  *  本机内置 testlib.h（见 testlib/ 目录），因此 checker.cpp 可直接 #include "testlib.h"，
  *  无需随测试数据包上传头文件；若数据包自带 testlib.h（与 checker.cpp 同目录），优先生效。
- *
- *  **编译产物按「源码内容哈希」长期缓存于 data/spj_cache**：同一道题的 checker 只要没改动，
- *  后续每次评测都直接复用已编译好的可执行文件，不再重复调用 g++（省去每次 0.3~2 秒的编译开销）。
- *  checker 源码 / 所用 testlib.h 任一变化，哈希随之改变 → 自动重新编译并生成新的缓存条目。 */
+ *  同一道题的 checker 源码未变时复用缓存的可执行文件，避免每次提交都重复编译。 */
 const crypto = require('crypto');
 const SPJ_CACHE_DIR = path.join(DATA_DIR, 'spj_cache');
-/** 缓存上限：最多保留多少个 checker 可执行文件、以及多久未使用即清理（按最近使用时间计） */
-const SPJ_CACHE_MAX_ENTRIES = 30;
-const SPJ_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
-const SPJ_TMP_MAX_AGE_MS = 5 * 60 * 1000;
 
 /** 正在被评测使用的 SPJ checker：judgeDir -> Set<绝对路径>。
- *  用于清理缓存时跳过正在运行的 checker，避免并发评测互相影响。 */
+ *  用于在「评测结束立即删除编译产物」的同时，避免并发评测把别人正在运行的 checker 删掉。 */
 const spjInUse = new Map();
 
 function trackChecker(judgeDir, exeFile) {
@@ -518,66 +511,52 @@ function trackChecker(judgeDir, exeFile) {
   return exeFile;
 }
 
-/** 一次评测结束：仅解除本次评测对 checker 的占用。
- *  **不再删除编译产物**（编译产物是跨提交复用的缓存，删除会导致下次评测重新编译）；
- *  只顺带清理编译中途失败 / 进程崩溃残留的 *.tmp 文件，返回清理数量。 */
+/** 一次评测结束后：删除本次编译出的 SPJ checker（仍被其它并发评测引用时保留给那次评测收尾）。
+ *  返回删除的文件数。 */
 function releaseSubmissionCheckers(judgeDir) {
+  const mine = spjInUse.get(judgeDir);
   spjInUse.delete(judgeDir);
   let removed = 0;
+  if (mine) {
+    for (const exe of mine) {
+      let usedElsewhere = false;
+      for (const set of spjInUse.values()) { if (set.has(exe)) { usedElsewhere = true; break; } }
+      if (usedElsewhere) continue;
+      try { fs.rmSync(exe, { force: true }); removed++; } catch { /* 文件被占用则留给兜底清理 */ }
+    }
+  }
+  // 顺带清掉编译中途失败/进程崩溃残留的临时文件（超过 5 分钟未变动才算残留）
   try {
     const now = Date.now();
     for (const name of fs.readdirSync(SPJ_CACHE_DIR)) {
       if (!name.endsWith('.tmp')) continue;
       const p = path.join(SPJ_CACHE_DIR, name);
-      try {
-        if (now - fs.statSync(p).mtimeMs > SPJ_TMP_MAX_AGE_MS) { fs.rmSync(p, { force: true }); removed++; }
-      } catch { /* ignore */ }
+      try { if (now - fs.statSync(p).mtimeMs > 5 * 60 * 1000) { fs.rmSync(p, { force: true }); removed++; } } catch { /* ignore */ }
     }
   } catch { /* ignore */ }
   return removed;
 }
 
-/**
- * 清理 SPJ 编译缓存（启动时与定时执行）：**只做过期 / 超量淘汰，不整目录清空**，
- * 这样已编译的 checker 能持续被复用。
- *   1) 超过 5 分钟未变动的 *.tmp（编译中断残留）直接删除；
- *   2) checker_*.exe 按「最近使用时间」保留最新 SPJ_CACHE_MAX_ENTRIES 个；
- *   3) 超过 SPJ_CACHE_MAX_AGE_MS 未使用的条目删除。
- * 正在被评测使用的文件始终跳过。返回 { removed, kept }。
- */
-function pruneSpjCache({ maxEntries = SPJ_CACHE_MAX_ENTRIES, maxAgeMs = SPJ_CACHE_MAX_AGE_MS } = {}) {
+/** 兜底清理 SPJ 编译缓存目录（启动时与定时执行）：正常评测结束已即时删除，
+ *  这里处理进程崩溃等情况；正在使用中的 checker 会被跳过。返回删除的文件数。 */
+function cleanSpjCache() {
   const inUse = new Set();
   for (const set of spjInUse.values()) for (const p of set) inUse.add(p);
   let names = [];
-  try { names = fs.readdirSync(SPJ_CACHE_DIR); } catch { return { removed: 0, kept: 0 }; }
+  try { names = fs.readdirSync(SPJ_CACHE_DIR); } catch { return 0; }
   const now = Date.now();
   let removed = 0;
-  const exes = [];
   for (const name of names) {
     const p = path.join(SPJ_CACHE_DIR, name);
-    let st = null;
-    try { st = fs.statSync(p); } catch { continue; }
-    if (name.endsWith('.tmp')) {
-      if (now - st.mtimeMs > SPJ_TMP_MAX_AGE_MS && !inUse.has(p)) {
-        try { fs.rmSync(p, { force: true }); removed++; } catch { /* ignore */ }
-      }
-      continue;
-    }
-    if (!/^checker_[0-9a-f]{6,}\.exe$/.test(name)) continue;   // 只管理本模块生成的缓存文件
-    exes.push({ p, mtime: st.mtimeMs });
+    if (inUse.has(p)) continue;
+    try {
+      if (name.endsWith('.tmp') && now - fs.statSync(p).mtimeMs < 5 * 60 * 1000) continue;
+      fs.rmSync(p, { recursive: true, force: true });
+      removed++;
+    } catch { /* ignore */ }
   }
-  exes.sort((a, b) => b.mtime - a.mtime);                       // 最近使用的排前面
-  exes.forEach((e, i) => {
-    const tooOld = now - e.mtime > maxAgeMs;
-    if ((i >= maxEntries || tooOld) && !inUse.has(e.p)) {
-      try { fs.rmSync(e.p, { force: true }); removed++; } catch { /* 文件被占用时留待下次清理 */ }
-    }
-  });
-  return { removed, kept: exes.length - removed };
+  return removed;
 }
-
-/** 兼容旧调用名（语义已由「整目录清空」改为「按上限/过期淘汰」） */
-const cleanSpjCache = pruneSpjCache;
 
 async function compileChecker(problemId, judgeDir, checkerSrcFile) {
   const tool = resolveTool('g++');
@@ -592,26 +571,14 @@ async function compileChecker(problemId, judgeDir, checkerSrcFile) {
   const dataTestlib = path.join(srcDir, 'testlib.h');
   const usedTestlib = fs.existsSync(dataTestlib) ? dataTestlib : bundledTestlib;
   try { hashInput.push(fs.readFileSync(path.join(usedTestlib), 'utf8')); } catch (e) { hashInput.push('?testlib'); }
-  hashInput.push('flags:-fno-asm -std=c++14 -O2');           // 编译参数变化时同样重新编译
   const h = crypto.createHash('sha1').update(hashInput.join('\n---\n')).digest('hex');
   const cachedExe = path.join(SPJ_CACHE_DIR, 'checker_' + h + '.exe');
-
-  // 命中缓存：直接复用（更新访问时间以便按「最近使用」淘汰），跳过 g++ 编译
-  try {
-    const st = fs.statSync(cachedExe);
-    if (st.size > 0) {
-      try { const t = new Date(); fs.utimesSync(cachedExe, t, t); } catch { /* ignore */ }
-      console.log(`[OJ] SPJ checker 命中编译缓存（题目 #${problemId}），跳过编译：${path.basename(cachedExe)}`);
-      return { ok: true, exeFile: trackChecker(judgeDir, cachedExe), cached: true };
-    }
-    fs.rmSync(cachedExe, { force: true });                   // 空文件视为无效，重新编译
-  } catch { /* 未命中缓存 */ }
+  if (fs.existsSync(cachedExe)) return { ok: true, exeFile: trackChecker(judgeDir, cachedExe), cached: true };
 
   // 编译到缓存路径（先写临时文件再改名，避免并发重复编译时读到半成品）
   try { fs.mkdirSync(SPJ_CACHE_DIR, { recursive: true }); } catch (e) { /* ignore */ }
   const tmpExe = cachedExe + '.' + process.pid + '.tmp';
   const cmd = `"${tool}" -fno-asm -std=c++14 -O2 -I"${srcDir}" -I"${bundledTestlib}" "${checkerSrcFile}" -o "${tmpExe}"`;
-  const t0 = Date.now();
   const r = await runShell(cmd, { cwd: srcDir, timeoutMs: 120000, stdoutFile: logFile, stderrFile: logFile });
   let log = '';
   try { log = fs.readFileSync(logFile, 'utf8'); } catch { /* ignore */ }
@@ -622,9 +589,6 @@ async function compileChecker(problemId, judgeDir, checkerSrcFile) {
     return { ok: false, log: log || `checker 编译失败（退出码 ${r.code}）` };
   }
   try { fs.renameSync(tmpExe, cachedExe); } catch (e) { /* 改名失败（并发）则以现有缓存为准 */ }
-  console.log(`[OJ] SPJ checker 编译完成并写入缓存（题目 #${problemId}，${Date.now() - t0}ms）：${path.basename(cachedExe)}`);
-  // 每次新增缓存条目后做一次轻量淘汰，避免目录无限增长
-  try { pruneSpjCache(); } catch { /* ignore */ }
   return { ok: true, exeFile: trackChecker(judgeDir, cachedExe) };
 }
 
@@ -1102,8 +1066,8 @@ class JudgeQueue {
       db.prepare("UPDATE submissions SET status = ?, verdict = ?, compile_error = ? WHERE id = ?")
         .run('Done', VERDICTS.SE, String(e && e.stack ? e.stack : e).slice(0, 2000), id);
     } finally {
-      // 评测结束立即删除该提交的临时工作目录（源码/编译中间产物/输入输出）。
-      // SPJ checker 的编译产物**不删除**：它按源码哈希缓存在 data/spj_cache，供后续提交直接复用。
+      // 评测结束立即删除该提交的临时工作目录（源码/编译中间产物/输入输出）与本次编译出的 SPJ checker，
+      // 不保留任何评测产生的缓存/编译文件；同一 checker 仍被并发评测使用时，留给那次评测结束再删。
       const workDir = path.join(JUDGE_DIR, String(id));
       try { releaseSubmissionCheckers(workDir); } catch { /* ignore */ }
       try { fs.rmSync(workDir, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -1235,8 +1199,6 @@ module.exports = {
   judgeSubmission,
   cleanJudgeWorkDirs,
   cleanSpjCache,
-  pruneSpjCache,
-  SPJ_CACHE_DIR,
   releaseSubmissionCheckers,
   pruneGoCache,
 };

@@ -172,9 +172,6 @@
 1. 题目设置中勾选「Special Judge」；
 2. 在**测试数据 ZIP 包内**放入 `checker.cpp`（需同时放入 `testlib.h`，参考洛谷文档下载 testlib）；
 3. 上传测试数据后系统自动按洛谷参数编译：`g++ -fno-asm -std=c++14 -O2 checker.cpp -o checker`；
-   - **编译产物会缓存**：可执行文件按「checker 源码 + 所用 testlib.h + 编译参数」的内容哈希存放在 `data/spj_cache/`，
-     同一份 checker 只需编译 **一次**，之后的每次评测都直接复用，不再重复调用 g++（checker 改动后哈希变化，会自动重新编译）；
-   - 缓存不会无限增长：超过 30 个条目或 30 天未使用的会被自动淘汰（`log` 中可见「SPJ checker 命中编译缓存 / 编译完成并写入缓存」）；
 4. 每个测试点按 testlib 约定运行 `checker <in> <ouf> <ans>`：
    - 退出码 `0` = AC（若 checker 标准输出包含 0~1 或 1~100 的数值，则按比例计部分分）；
    - 退出码 `1` = WA，`2` = 格式错误（按 WA），`3` = checker 自身异常（判 SE）；
@@ -229,7 +226,7 @@
 ## 12. 数据与重置
 
 - 数据目录：`data/`（环境变量 `OJ_DATA_DIR` 可覆盖）；
-- 重置：删除 `data/` 重启，自动重建并写入种子数据（管理员 admin + 随机初始密码，见 `data/admin-password.txt`；以及内置示例题）；
+- 重置：删除 `data/` 重启，自动重建并写入种子数据（admin/admin123 与 6 道示例题）；
 - 备份：复制 `data/` 目录即可。
 
 ## 13. 常用环境变量

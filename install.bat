@@ -128,7 +128,7 @@ if "%PORT%"=="" set PORT=80
 echo.
 echo 启动 LCZOJ 服务（端口 %PORT%）...
 echo 访问地址: http://localhost:%PORT%
-echo 管理员账号: admin（初始密码在首次启动时随机生成，启动日志会显示，并写入 data\admin-password.txt）
+echo 管理员账号: admin / admin123（首次启动自动创建，请尽快修改密码）
 echo ==============================================
 echo 提示：关闭本窗口后服务会停止。如需长期运行，
 echo      可改用 install.bat --daemon（后台运行）。

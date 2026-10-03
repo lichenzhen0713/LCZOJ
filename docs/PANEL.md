@@ -57,9 +57,6 @@ node deploy/panel-install.js       # 准备环境 + 后台启动服务 + 生成�
 
 保存后通过域名访问站点。
 
-> 还没有域名时可以先直接用 `http://服务器公网IP:端口/` 访问（脚本会打印公网地址；自动识别失败时用 `LCZOJ_PUBLIC_IP=你的IP` 指定）。
-> 管理员账号为 `admin`，**初始密码在首次启动时随机生成**：启动日志会打印一次，也写在数据目录的 `admin-password.txt`。
-
 ### 2.4 申请 SSL 证书
 
 站点 → 「SSL」→ 「Let's Encrypt」→ 勾选域名 → 申请 → 开启「强制 HTTPS」。
