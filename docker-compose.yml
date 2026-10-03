@@ -1,0 +1,61 @@
+# =============================================================================
+#  LCZOJ 在线评测系统 · Docker Compose 一键部署
+#
+#  用法（不用改这个文件里的任何东西）：
+#    docker compose up -d --build      # 构建并启动（首次约 3~10 分钟）
+#    docker compose logs -f            # 看日志
+#    docker compose down               # 停止（数据保留在数据卷里，不会丢）
+#    docker compose up -d --build      # 代码更新后重新构建启动
+#
+#  更省事的方式：node deploy/docker-onekey.js（自动选端口、等就绪、打印网址）
+#
+#  启动后打开 http://服务器公网IP/ ，账号 admin；初始密码随机生成，看 docker compose logs 或
+#  容器内 /app/data/admin-password.txt（登录后请立刻改密码）
+# =============================================================================
+
+services:
+  lczoj:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # 想构建「精简镜像」（只有 Python / JavaScript / PHP 三种语言）就取消下面两行注释
+      # args:
+      #   WITH_TOOLCHAINS: "0"
+    image: lczoj:2.1.0
+    container_name: lczoj
+    restart: unless-stopped
+
+    # 默认使用 80 端口，打开 http://服务器IP 即可访问，不用带端口号。
+    # 如果这台机器上 80 端口已被 Nginx/宝塔占用，把下面这行改成 "8080:80"，
+    # 然后访问 http://服务器IP:8080 （用 node deploy/docker-onekey.js 会自动帮你选端口）
+    ports:
+      - "80:80"
+
+    environment:
+      PORT: "80"                 # 容器内端口，保持 80 不用改
+      OJ_HOST: "0.0.0.0"         # 监听地址，保持默认
+      OJ_MAX_JUDGES: "4"         # 并行判题数；容器里看到的是宿主机核数，所以这里要显式设置
+      TZ: "Asia/Shanghai"        # 时区（页面时间显示）
+
+    volumes:
+      # 数据卷：数据库、题库测试数据、附件、头像、判题缓存都在这里；删容器不会丢
+      - lczoj-data:/app/data
+      # 想让数据直接放在宿主机目录（方便随时备份/迁移）就注释掉上面一行，改用下面这行：
+      # - ./data:/app/data
+
+    # 判题要 fork 出编译器/解释器进程，给足文件描述符
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
+    # 日志轮转，避免长期运行把磁盘写满
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  lczoj-data:
+    name: lczoj-data

@@ -1,0 +1,17 @@
+# 运行时数据（数据库、测试数据、判题临时文件）
+data/
+# 日志
+*.log
+logs/
+# 面板部署时生成的本地配置（每台服务器都不一样，不入库）
+deploy/panel.env
+deploy/panel.pid
+deploy/panel-nginx.conf
+# 更新脚本的备份
+data/backup/
+# 系统文件
+.DS_Store
+Thumbs.db
+# 编辑器
+.vscode/
+.idea/

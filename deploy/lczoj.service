@@ -1,0 +1,45 @@
+# =============================================================================
+#  LCZOJ systemd 服务单元（裸机 / 宝塔「系统服务」/ 支持 systemd 的面板通用）
+#
+#  安装：
+#    1) 按实际路径修改下面三处：WorkingDirectory / ExecStart / User
+#       （宝塔站点目录通常是 /www/wwwroot/你的域名，用户是 www）
+#    2) sudo cp deploy/lczoj.service /etc/systemd/system/lczoj.service
+#    3) sudo systemctl daemon-reload && sudo systemctl enable --now lczoj
+#    4) 查看状态与日志：systemctl status lczoj / journalctl -u lczoj -f
+# =============================================================================
+
+[Unit]
+Description=LCZOJ 在线评测系统
+Documentation=file:///www/wwwroot/lczoj/README.md
+After=network.target
+
+[Service]
+Type=simple
+# ↓↓↓ 按实际情况修改：项目目录、Node 路径、运行用户 ↓↓↓
+WorkingDirectory=/www/wwwroot/lczoj
+ExecStart=/usr/bin/env node server.js
+User=www
+Group=www
+
+# 站点参数：Nginx 反代到 127.0.0.1:3000（宝塔/小皮站点配置反向代理即可）
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=OJ_HOST=127.0.0.1
+Environment=OJ_MAX_JUDGES=4
+Environment=TZ=Asia/Shanghai
+# 数据目录（数据库/测试数据/附件）：默认项目下 data/，要放数据盘就取消注释
+# Environment=OJ_DATA_DIR=/www/wwwroot/lczoj-data
+
+# 收到 stop 时先发 SIGTERM，程序会等正在评测的提交收尾后再退出
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=always
+RestartSec=3
+
+# 基础加固（判题需要执行用户代码，这里不做过度限制，仅防误写系统目录）
+NoNewPrivileges=true
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target
