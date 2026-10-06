@@ -1,0 +1,39 @@
+{
+  "name": "lczoj",
+  "version": "2.7.5",
+  "description": "零外部依赖的在线评测系统 (Online Judge)：Node.js 内置模块实现，支持多语言评测（可上传源码文件）、并行判题与题目重判、网站外观自定义、讨论区与权限管理；支持一键脚本、宝塔/小皮面板与 Docker 部署",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check": "node --check server.js && node --check public/js/app.js",
+    "check:env": "node deploy/check-env.js",
+    "panel:install": "node deploy/panel-install.js",
+    "docker:onekey": "node deploy/docker-onekey.js",
+    "install:linux": "bash install.sh --no-start",
+    "install:win": "install.bat",
+    "docker:build": "docker build -t lczoj:2.7.5 .",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "keywords": [
+    "online-judge",
+    "oj",
+    "judge",
+    "luogu",
+    "acm",
+    "oi",
+    "nodejs",
+    "zero-dependency"
+  ],
+  "license": "MIT",
+  "author": "OJ Contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lichenzhen0713/LCZOJ"
+  }
+}
