@@ -1,0 +1,80 @@
+# =============================================================================
+#  LCZOJ 在线评测系统 · Docker Compose 一键部署
+#
+#  用法（不用改这个文件里的任何东西）：
+#    docker compose up -d --build      # 构建并启动（首次约 3~10 分钟）
+#    docker compose logs -f            # 看日志
+#    docker compose down               # 停止（数据保留在数据卷里，不会丢）
+#    docker compose up -d --build      # 代码更新后重新构建启动
+#
+#  更省事的方式：node deploy/docker-onekey.js（自动选端口、等就绪、打印网址）
+#
+#  启动后打开 http://服务器公网IP/ ，账号 admin；初始密码随机生成，看 docker compose logs 或
+#  容器内 /app/data/admin-password.txt（登录后请立刻改密码）
+# =============================================================================
+
+services:
+  lczoj:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # 想构建「精简镜像」（只有 Python / JavaScript / PHP 三种语言）就取消下面两行注释
+      # args:
+      #   WITH_TOOLCHAINS: "0"
+    image: lczoj:2.8.9
+    container_name: lczoj
+    restart: unless-stopped
+
+    # 默认使用 80 端口，打开 http://服务器IP 即可访问，不用带端口号。
+    # 如果这台机器上 80 端口已被 Nginx/宝塔占用，把下面这行改成 "8080:80"，
+    # 然后访问 http://服务器IP:8080 （用 node deploy/docker-onekey.js 会自动帮你选端口）
+    ports:
+      - "80:80"
+
+    environment:
+      PORT: "80"                 # 容器内端口，保持 80 不用改
+      OJ_HOST: "0.0.0.0"         # 监听地址，保持默认
+      OJ_MAX_JUDGES: "4"         # 并行判题数；容器里看到的是宿主机核数，所以这里要显式设置
+      TZ: "Asia/Shanghai"        # 时区（页面时间显示）
+
+    volumes:
+      # 数据卷：数据库、题库测试数据、附件、头像、判题缓存都在这里；删容器不会丢
+      - lczoj-data:/app/data
+      # 想让数据直接放在宿主机目录（方便随时备份/迁移）就注释掉上面一行，改用下面这行：
+      # - ./data:/app/data
+
+    # ---------------- 安全加固（L16 / H1） ----------------
+    # 禁止提权（setuid/setgid 一律无效）
+    security_opt:
+      - no-new-privileges:true
+    # 丢掉全部能力，只保留「非 root 绑 80 端口」这一项（镜像里对 node 做了 setcap；
+    # 若你把端口改成 8080 并前置 Nginx 反代，可以连 NET_BIND_SERVICE 一起去掉）
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    # 根文件系统只读：镜像内容不可改，可写位置只有数据卷 /app/data 与 tmpfs /tmp
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+    # 容器内服务以镜像自带 node(UID 1000) 运行（entrypoint 用 gosu 降权），
+    # 判题时不再二级降权（容器内没有 CAP_SETUID，judge.js 会自动检测并回退），
+    # 隔离由容器本身提供。
+    # 注意：data/ 与 testdata 权限由 install/容器入口设置，宿主机绑定挂载时请确保属主为 1000:1000。
+
+    # 判题要 fork 出编译器/解释器进程，给足文件描述符
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+
+    # 日志轮转，避免长期运行把磁盘写满
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  lczoj-data:
+    name: lczoj-data

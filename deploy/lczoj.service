@@ -1,0 +1,111 @@
+# =============================================================================
+#  LCZOJ systemd 服务单元（裸机 / 宝塔「系统服务」/ 支持 systemd 的面板通用）
+#
+#  安装：
+#    1) 按实际路径修改下面三处：WorkingDirectory / ExecStart（node 的**绝对路径**）/ 数据目录
+#       （宝塔站点目录通常是 /www/wwwroot/你的域名；node 路径用 `command -v node` 查）
+#    2) 安装脚本会创建专用低权账户 lczoj 并把 data/ 属主给它（见 install*.sh）
+#       —— 服务本身用 **lczoj** 运行，判题时再把选手程序降到 nobody（H1，见 OJ_JUDGE_USER）
+#       （注意：只有服务以 root 运行时才真正降权得成；非 root 时 src/config.js 会回退为同账户运行）
+#    3) sudo cp deploy/lczoj.service /etc/systemd/system/lczoj.service
+#    4) sudo systemctl daemon-reload && sudo systemctl enable --now lczoj
+#    5) 查看状态与日志：systemctl status lczoj / journalctl -u lczoj -f
+#    6) 确认真的能访问：curl -fsS http://127.0.0.1/api/health（应返回 "status":"up"）
+#
+#  监听方式（两选一，默认第 1 种）：
+#    1) 直连对外（默认）：PORT=80 + OJ_HOST=0.0.0.0 —— 装完直接 http://服务器IP 访问，**不需要 Nginx**。
+#       非 root 绑 80 需要下面的 AmbientCapabilities（Ubuntu ≤22.04、CentOS 7/8 默认不允许非 root 绑 <1024）。
+#    2) Nginx / 宝塔面板反代：把 PORT 改成 3000、OJ_HOST 改成 127.0.0.1（见文件末尾附录），
+#       反代配置见 deploy/nginx-lczoj.conf；此时 AmbientCapabilities 两行可删（留着也无害）。
+#       ⚠ 面板（宝塔/小皮）的 80/443 一般已被面板自己的 Nginx 占用，所以面板部署请直接用第 2 种。
+#
+#  安全说明（L16）：
+#    · ProtectSystem=strict + ReadWritePaths 只放开数据/日志/临时目录，服务无法写系统目录；
+#    · ProtectHome=true 让服务看不到 /home、/root、/run/user；PrivateTmp=true 给服务独立 /tmp
+#      （判题临时目录用的是 OJ 数据目录下的 judge/ 与 /tmp/lczoj-memsampler，
+#       后者在 PrivateTmp 下仍是服务私有的临时目录，不影响评测）。
+#      ⚠ 项目如果放在 /home、/root、/run/user 下面，必须把 ProtectHome 改成 false，
+#        否则服务读不到 server.js，表现为「脚本说装好了，但访问不了」。install*.sh 会自动处理。
+#    · 注意：ProtectSystem=strict 会让 /usr、/etc 只读；判题需要调用 g++/python 等（只读即可），
+#      如果需要就地写 /usr 请改成 ProtectSystem=full 并自行评估。
+#    · AmbientCapabilities 与 NoNewPrivileges 可以共存：systemd 在 execve 之前就把该能力放进
+#      环境能力集（并自动加 keep-caps securebit），而 NNP 只拦「通过 execve 获得新权限」。
+# =============================================================================
+
+[Unit]
+Description=LCZOJ 在线评测系统
+Documentation=file:///www/wwwroot/lczoj/README.md
+After=network.target
+
+[Service]
+Type=simple
+# ↓↓↓ 按实际情况修改：项目目录、Node 绝对路径（不要用 /usr/bin/env node —— systemd 的 PATH 很窄）↓↓↓
+WorkingDirectory=/www/wwwroot/lczoj
+ExecStart=/usr/local/bin/node server.js
+# 服务以专用账户运行（安装脚本创建；不要用 root）
+User=lczoj
+Group=lczoj
+# 补充组：判题降权目标账户（nobody）不需要在这里，因为降权是由 spawn 的 uid/gid 完成的
+SupplementaryGroups=lczoj
+
+# 站点参数（默认：直接监听 0.0.0.0:80 对外，无需 Nginx；反代用法见文件末尾附录）
+Environment=NODE_ENV=production
+Environment=PORT=80
+Environment=OJ_HOST=0.0.0.0
+Environment=OJ_MAX_JUDGES=4
+Environment=TZ=Asia/Shanghai
+# 判题要调用 g++ / python3 / javac 等，显式给出完整 PATH
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# 判题降权目标账户（H1）：选手程序 / grader+选手链接产物以此身份运行
+# （仅当服务以 root 运行时才生效；以 lczoj 运行时 src/config.js 会回退为同账户执行）
+Environment=OJ_JUDGE_USER=nobody
+# 判题私有目录 .priv 权限（默认 0700：低权账户完全读不到判分私有物；
+# 若你的 checker/交互器也要降权运行，可改成 0750 —— 代价见 README「安全」一节）
+# Environment=OJ_JUDGE_PRIV_MODE=0700
+# 数据目录（数据库/测试数据/附件）：默认项目下 data/，要放数据盘就取消注释
+# Environment=OJ_DATA_DIR=/www/wwwroot/lczoj-data
+
+# ---------------- 非 root 绑定 80 端口所需能力 ----------------
+# Ubuntu ≤ 22.04 与 CentOS 7/8 的 net.ipv4.ip_unprivileged_port_start 默认是 1024，
+# 少了这两行时 lczoj 账户绑 80 会 EACCES，systemd 表现出「服务起不来 → 外网访问不了」。
+# 若把 PORT 改成 ≥1024 的端口（或改用 Nginx 反代 3000 端口），可以删掉这两行。
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# 收到 stop 时先发 SIGTERM，程序会等正在评测的提交收尾后再退出
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=always
+RestartSec=3
+
+# ---------------- 加固（L16） ----------------
+NoNewPrivileges=true
+PrivateTmp=true
+# ⚠ 项目放在 /home、/root、/run/user 下时必须改成 false，否则服务读不到 server.js
+ProtectHome=true
+ProtectSystem=strict
+# 只允许写这些目录（按实际路径调整）：数据目录、日志目录、临时目录
+# 注意：项目代码目录在此设置下是**只读**的。后台「一键更新」要覆盖项目文件，在这个单元里会失败（EROFS）；
+# 更新请改用：sudo node deploy/update.js（或重跑安装脚本）。若确实要让网页端自助更新，
+# 需把项目目录也加进来（ReadWritePaths=... /www/wwwroot/lczoj），代价是服务账户可改写站点代码。
+ReadWritePaths=/www/wwwroot/lczoj/data /www/wwwroot/lczoj/logs /tmp
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+# 评测需要创建子进程（g++/python/选手程序），因此不能开 RestrictNamespaces/SystemCallFilter 的强限制
+# 说明：判题会在 data/judge 下创建临时目录并执行用户代码，这一步由 H1 降权到 OJ_JUDGE_USER。
+
+[Install]
+WantedBy=multi-user.target
+
+# =============================================================================
+#  附录：用 Nginx / 宝塔面板反代时，把上面的站点参数换成
+#    Environment=PORT=3000
+#    Environment=OJ_HOST=127.0.0.1
+#  再按 deploy/nginx-lczoj.conf 配置反代（宝塔：网站 → 反向代理 → 目标 http://127.0.0.1:3000）。
+#  这样 80/443 由 Nginx 处理域名与 TLS，服务只监听本机，更安全。
+#  ⚠ 只监听 127.0.0.1 却没有配置 Nginx 反代 → 外网必然打不开，这是最常见的一种「部署完访问不了」。
+# =============================================================================

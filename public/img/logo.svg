@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 36 88 76" width="88" height="76">
+  <defs>
+    <linearGradient id="lcGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+    <linearGradient id="checkGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#22C55E"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 左侧代码括号 <（stroke-width 10） -->
+  <path d="M46 44 L28 64 L46 84"
+        fill="none"
+        stroke="url(#lcGrad)"
+        stroke-width="10"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- 右侧代码括号 >（stroke-width 10） -->
+  <path d="M82 44 L100 64 L82 84"
+        fill="none"
+        stroke="url(#lcGrad)"
+        stroke-width="10"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- 中间 AC 对勾（stroke-width 12） -->
+  <path d="M50 66 L64 80 L92 46"
+        fill="none"
+        stroke="url(#checkGrad)"
+        stroke-width="12"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- 底部三个测试点：半径 6（直径 12 = 对勾笔画粗细，与其它元素一致）；圆心 38/64/90 -->
+  <circle cx="38" cy="103" r="6" fill="#4F46E5"/>
+  <circle cx="64" cy="103" r="6" fill="#06B6D4"/>
+  <circle cx="90" cy="103" r="6" fill="#22C55E"/>
+</svg>
