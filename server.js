@@ -1,5 +1,9 @@
 'use strict';
 
+// 可选 .env：本地开发 / 单机部署时把 PORT、OJ_OAUTH_* 等写进项目根目录的 .env 即可，
+// 不必每次在命令行前手工 export。文件不存在（或 Node < 20.12）时静默跳过，行为与以前完全一致。
+try { process.loadEnvFile(); } catch { /* no .env / unsupported node */ }
+
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -25,6 +29,7 @@ const taxonomy = require('./src/taxonomy');
 const attachments = require('./src/attachments');
 const notifications = require('./src/notifications');
 const messages = require('./src/messages');
+const oauth = require('./src/oauth');
 
 const { JudgeQueue, availableLanguages, cleanJudgeWorkDirs, pruneSpjCache, pruneGoCache, pruneInteractorCache } = require('./src/judge');
 
@@ -559,6 +564,7 @@ function buildDocsList(current) {
     ['LANGUAGES.md', '多语言配置'],
     ['CUSTOMIZATION.md', '自定义指南'],
     ['POINTS.md', '积分系统说明'],
+    ['OAUTH.md', 'OAuth 授权登录'],
     ['FAQ.md', '常见问题'],
     ['CONTRIBUTING.md', '贡献指南'],
     ['CHANGELOG.md', '版本日志'],
@@ -642,6 +648,12 @@ const server = http.createServer(async (req, res) => {
 
 async function handleApi(req, res, url, method, viewer, pathname) {
   const seg = pathname.slice(5).split('/').filter(Boolean); // 去掉 /api/
+
+  // OAuth 2.0 授权服务器（Lith Tools 授权登录）；未配置时接口内部统一返回「未启用」
+  if (seg[0] === 'oauth') {
+    const handled = await oauth.handleApi(req, res, url, method, viewer, seg);
+    if (handled) return;
+  }
 
   // 认证相关
   if (seg.length === 1) {

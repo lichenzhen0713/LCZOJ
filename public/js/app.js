@@ -64,6 +64,17 @@ function safeHashHref(h) {
   const cleaned = s.replace(/[^A-Za-z0-9\-_./?=&%#:+~@!,;()[\]]/g, '');
   return /^#\//.test(cleaned) ? cleaned : '';
 }
+/** 站内绝对路径（必须以单个 / 开头）才允许整页跳转：
+ *  OAuth 授权页需要「登录后回到 /api/oauth/authorize?...」这种站内接口地址；
+ *  这里同时挡掉 //evil.com（协议相对地址）、反斜杠与不可见字符，避免开放重定向。 */
+function safeLocalPath(h) {
+  const s = String(h == null ? '' : h).trim();
+  if (!/^\/(?!\/)/.test(s)) return '';
+  if (!/^[\x21-\x7e]+$/.test(s)) return '';
+  if (s.includes('\\')) return '';
+  return s;
+}
+
 /** 返回链接：有来源页时返回来源页，否则回退到 fallback。
  *  S3：返回值会被拼进 6+ 处 href，因此这里统一做字符白名单 + escapeHtml，调用点无需再处理。 */
 function backHref(fallback) {
@@ -936,7 +947,7 @@ async function route() {
     if (parts[0] === 'editorial' && parts[1] === 'edit' && parts[2]) { await renderEditorialEditor(parts[2], null); return; }
     if (parts[0] === 'editorial' && parts[1]) { await renderEditorialDetail(parts[1], query); return; }
     if (parts[0] === 'login') { renderLogin(query); return; }
-    if (parts[0] === 'register') { renderRegister(); return; }
+    if (parts[0] === 'register') { renderRegister(query); return; }
     if (parts[0] === 'forgot-password' && parts.length === 1) { await renderForgotPassword(); return; }
     // v2.7.0：清理多余数据 / 批量生成用户 / 批量删除都并入系统设置 →
     // #/settings/cleanup、#/settings/batch-users、#/settings/batch-delete（侧边栏高亮「系统设置」）。
@@ -1322,8 +1333,7 @@ function bindCodeViewCopy(root) {
 /* 用户名配色表（v2.7.0）：每一档都指向 style.css 末尾定义的 --uc-* 变量。
    八档在浅色 / 深色主题下都是**同一个单一色值**（灰 #8c8c8c、蓝 #0e90d2、青 #09d9e9、
    绿 #5eb95e、橙 #f39c11、红 #fe4c61、管理员紫 #8e44ad、棕名棕 #8b5e3c），
-   黄色档按用户指定（v2.7.6）为 rgb(250,219,20) = #fadb14（两主题同值，色值与
-   「Compile Error」判定色 .verdict-CE 完全一致）。
+   黄色档自 v2.9.1 起为 #ead80e（两主题同值；与「Compile Error」判定色 #fae607 已分开）。
    等级 / 积分算法不变；分档阈值见下方 userColor()（v2.7.6 起为 100/120/140/160/180/200）。 */
 const USER_COLORS = {
   gray: 'var(--uc-gray)', blue: 'var(--uc-blue)', cyan: 'var(--uc-cyan)', green: 'var(--uc-green)',
@@ -3655,7 +3665,7 @@ async function renderRanking(query) {
   const data = await api.get('/api/points-ranking?' + params.toString());
   setPageTitle('积分排行榜');
   const rows = data.items.length === 0
-    ? `<tr><td colspan="9" class="empty">暂无数据${page > 1 ? '（已到榜单末尾）' : ''}</td></tr>`
+    ? `<tr><td colspan="8" class="empty">暂无数据${page > 1 ? '（已到榜单末尾）' : ''}</td></tr>`
     : data.items.map((u) => `
       <tr data-user="${u.id}">
         <td class="num" style="font-weight:800;width:50px">${u.rank <= 3 ? ['<i class="fa-solid fa-medal" style="color:#f5b301"></i>','<i class="fa-solid fa-medal" style="color:#c0c0c0"></i>','<i class="fa-solid fa-medal" style="color:#cd7f32"></i>'][u.rank - 1] : u.rank}</td>
@@ -3665,7 +3675,7 @@ async function renderRanking(query) {
         <td class="num" style="color:${ioiScoreColor(u.breakdown.practice)};font-weight:700">${u.breakdown.practice}</td>
         <td class="num" style="color:${ioiScoreColor(u.breakdown.contest)};font-weight:700">${u.breakdown.contest}</td>
         <td class="num" style="color:${ioiScoreColor(u.breakdown.community)};font-weight:700">${u.breakdown.community}</td>
-        <td>${u.brown_name ? '<span class="badge" style="background:#8b5e3c;color:#fff">棕名</span>' : ''}${u.banned ? '<span class="badge" style="background:#ff4d4f;color:#fff">已封禁</span>' : ''}</td>
+        <td class="num muted" style="white-space:nowrap">${u.achieved_at ? fmtTime(u.achieved_at) : '—'}</td>
       </tr>`).join('');
 
   app.innerHTML = `
@@ -3674,10 +3684,10 @@ async function renderRanking(query) {
       <a class="btn btn-ghost" href="#/rating-rank"><i class="fa-solid fa-chart-line"></i>等级分排行</a>
     </div>
     <h1 class="page-title" style="margin:16px 0 0">积分排行榜</h1>
-    <p class="muted mb">按积分排名；积分颜色：≥320 绿 · ≥240 黄 · ≥160 橙 · 其余红（满分 400）；用户名颜色随积分变化：&lt;100 灰 · 100+ 蓝 · 120+ 青 · 140+ 绿 · 160+ 黄 · 180+ 橙 · 200+ 红；管理员紫色，棕名棕色。各列为四维分项（基础 / 练习 / 比赛 / 社区），点击用户行在新标签页打开个人中心。</p>
+    <p class="muted mb">按积分排名；积分颜色：≥320 绿 · ≥240 黄 · ≥160 橙 · 其余红（满分 400）；用户名颜色随积分变化：&lt;100 灰 · 100+ 蓝 · 120+ 青 · 140+ 绿 · 160+ 黄 · 180+ 橙 · 200+ 红；管理员紫色，棕名棕色。各列为四维分项（基础 / 练习 / 比赛 / 社区）。「积分达成时间」取该用户最近一次 AC 提交的时间（从未 AC 则显示注册时间）。点击用户行在新标签页打开个人中心。</p>
     <div class="card table-scroll" style="padding:0">
       <table class="table">
-        <thead><tr><th class="num">排名</th><th>用户</th><th class="num">积分</th><th class="num">基础</th><th class="num">练习</th><th class="num">比赛</th><th class="num">社区</th><th>状态</th></tr></thead>
+        <thead><tr><th class="num">排名</th><th>用户</th><th class="num">积分</th><th class="num">基础</th><th class="num">练习</th><th class="num">比赛</th><th class="num">社区</th><th class="num" title="该用户最近一次「得分事件」的时间：其所有 AC 提交中 created_at 的最大值；若从未 AC，则回退为其注册时间。">积分达成时间</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
@@ -5077,7 +5087,12 @@ function renderLogin(query) {
   const rawRedirect = (query && query.get('redirect')) || '';
   const prevHash = (typeof PREV_HASH === 'string' ? PREV_HASH : '') || '';
   const prevPath = prevHash.replace(/^#?\/?/, '').replace(/^\?.*/, '');
-  const redirect = (rawRedirect || (/^(login|register|verify|forgot-password|reset|logout)/.test(prevPath) ? '' : prevPath)).trim();
+  // redirect 有两种：站内 hash 路由（如 problem/1）与站内绝对路径（如 /api/oauth/authorize?...）。
+  // 后者用于 OAuth 授权：登录成功后必须整页跳转（location.href），不能塞进 #/ 里。
+  const wanted = (rawRedirect || (/^(login|register|verify|forgot-password|reset|logout)/.test(prevPath) ? '' : prevPath)).trim();
+  const absoluteRedirect = safeLocalPath(wanted);
+  const redirect = absoluteRedirect ? '' : wanted;
+  const registerHref = '#/register' + (absoluteRedirect ? '?redirect=' + encodeURIComponent(absoluteRedirect) : '');
   app.innerHTML = `
     <div class="auth-wrap">
       <div class="auth-card">
@@ -5087,7 +5102,7 @@ function renderLogin(query) {
         <div class="form-group"><label>用户名 / 邮箱</label><input class="input" id="l-username" placeholder="输入用户名或邮箱" value="${escapeHtml(prefill)}" /></div>
         <div class="form-group"><label>密码</label><input class="input" id="l-password" type="password" placeholder="输入密码" /></div>
         <button class="btn btn-lg" style="width:100%" id="l-submit"><i class="fa-solid fa-right-to-bracket"></i>登录</button>
-        <p class="muted" style="text-align:center;margin-top:16px">还没有账号？<a href="#/register">立即注册</a> · <a href="#/forgot-password">忘记密码？</a></p>
+        <p class="muted" style="text-align:center;margin-top:16px">还没有账号？<a href="${registerHref}">立即注册</a> · <a href="#/forgot-password">忘记密码？</a></p>
       </div>
     </div>`;
   const submit = async () => {
@@ -5101,6 +5116,8 @@ function renderLogin(query) {
       // H3：首登 / 弱口令 → 顶部横幅要求改密，并展示服务端给出的 password_warning 文案
       showPasswordWarning(r.password_warning);
       toast('登录成功，欢迎 ' + r.user.username, 'success');
+      // 站内绝对路径（OAuth 授权页）→ 整页跳转；否则回到登录前正在浏览的 hash 页面
+      if (absoluteRedirect) { location.href = absoluteRedirect; return; }
       // 回到登录前正在浏览的页面（没有来源页时去首页），不再额外弹跳转提示
       nav(redirect || 'home');
     } catch (e) { toast(e.message, 'error'); }
@@ -5109,7 +5126,10 @@ function renderLogin(query) {
   ['l-username', 'l-password'].forEach((id) => document.getElementById(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); }));
 }
 
-function renderRegister() {
+function renderRegister(query) {
+  // OAuth 授权场景：注册完成后要回到授权页（站内绝对路径），不能简单跳首页
+  const absoluteRedirect = safeLocalPath((query && query.get('redirect')) || '');
+  const loginHref = '#/login' + (absoluteRedirect ? '?redirect=' + encodeURIComponent(absoluteRedirect) : '');
   app.innerHTML = `
     <div class="auth-wrap">
       <div class="auth-card">
@@ -5120,7 +5140,7 @@ function renderRegister() {
         <div class="form-group"><label>邮箱</label><input class="input" id="r-email" placeholder="用于接收验证码 / 找回密码" /></div>
         <div class="form-group"><label>密码（至少 10 位，且含字母 / 数字 / 符号中至少两类）</label><input class="input" id="r-password" type="password" placeholder="设置一个强密码" /></div>
         <button class="btn btn-lg" style="width:100%" id="r-submit"><i class="fa-solid fa-user-plus"></i>注册</button>
-        <p class="muted" style="text-align:center;margin-top:16px">已有账号？<a href="#/login">去登录</a></p>
+        <p class="muted" style="text-align:center;margin-top:16px">已有账号？<a href="${loginHref}">去登录</a></p>
       </div>
     </div>`;
   const submit = async () => {
@@ -5151,7 +5171,7 @@ function renderRegister() {
             <p class="auth-sub">${escapeHtml(emailText)}</p>
             <div class="form-group mt"><label>输入邮箱中收到的验证码</label><input class="input" id="v-code" placeholder="6 位数字验证码" /></div>
             <button class="btn btn-lg" style="width:100%" id="v-submit"><i class="fa-solid fa-user-check"></i>验证并创建账号</button>
-            <p class="muted" style="text-align:center;margin-top:10px"><a href="#" id="v-resend">重新发送验证码</a> · <a href="#/login">返回登录</a></p>
+            <p class="muted" style="text-align:center;margin-top:10px"><a href="#" id="v-resend">重新发送验证码</a> · <a href="${loginHref}">返回登录</a></p>
           </div>
           </div>`;
         document.getElementById('v-submit').addEventListener('click', async () => {
@@ -5161,7 +5181,9 @@ function renderRegister() {
             await api.post('/api/verify-email', { code: document.getElementById('v-code').value.trim(), email: regEmail });
             // 验证通过后账号才真正创建，引导用户去登录（不再自动登录）
             toast('账号已创建，请登录', 'success');
-            nav('login', { username: regName });
+            const loginQuery = { username: regName };
+            if (absoluteRedirect) loginQuery.redirect = absoluteRedirect;
+            nav('login', loginQuery);
           } catch (e) {
             vb.disabled = false;
             toast(authErrorText(e), 'error');
@@ -5183,6 +5205,8 @@ function renderRegister() {
       Store.user = r.user;
       renderTopbar();
       toast('注册成功，欢迎 ' + r.user.username + '（UID ' + r.user.uid + '）', 'success');
+      // OAuth 授权场景：注册即已登录，直接回到授权页完成授权
+      if (absoluteRedirect) { location.href = absoluteRedirect; return; }
       nav('problems');
     } catch (e) {
       btn.disabled = false;

@@ -743,6 +743,58 @@ db.exec(`CREATE TABLE IF NOT EXISTS auth_failures (
   PRIMARY KEY (scope, ident)
 )`);
 
+/* ---------------- OAuth 2.0 授权服务器（Lith Tools 授权登录） ----------------
+ * LCZOJ 作为身份提供方（Authorization Server），让可信的第三方站点（默认 Lith Tools）
+ * 通过标准授权码流程拿到「当前登录用户是谁」，而**不会拿到 LCZOJ 的密码或会话 Cookie**。
+ *
+ * 四张表，全部是纯新增表（幂等迁移，兼容已有库，不改动任何既有表）：
+ *   · oauth_clients      —— 已登记客户端。目前由环境变量 OJ_OAUTH_CLIENT_ID / OJ_OAUTH_CLIENT_SECRET /
+ *                          OJ_OAUTH_REDIRECT_URIS 在启动时 upsert，secret 只存 sha256；
+ *   · oauth_identities   —— 每个用户在 OAuth 世界的**永久** sub。不能用 users.id 当 sub：
+ *                          LCZOJ 删除用户后会复用最小空闲 uid（见 nextFreeId），复用后的 uid 会让
+ *                          第三方把「新用户」误认成「旧用户」。sub 一旦生成永不改变，用户删除即级联删除。
+ *   · oauth_authorization_codes —— 一次性授权码（只存哈希、5 分钟有效、用后置 used_at）；
+ *   · oauth_access_tokens       —— 访问令牌（只存哈希、默认 1 小时有效、可撤销），供 userinfo 使用。
+ *
+ * 令牌 / 授权码都不落明文：即使数据库泄漏，也无法直接拿去冒充用户。
+ */
+db.exec(`CREATE TABLE IF NOT EXISTS oauth_clients (
+  client_id TEXT PRIMARY KEY,
+  secret_hash TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  redirect_uris TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS oauth_identities (
+  user_id INTEGER PRIMARY KEY,
+  sub TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
+  code_hash TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  redirect_uri TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'profile',
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS oauth_access_tokens (
+  token_hash TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'profile',
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  revoked INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+)`);
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_oauth_codes_expires ON oauth_authorization_codes(expires_at)'); } catch (e) { console.warn('[LCZOJ] oauth_authorization_codes 索引创建失败：' + (e && e.message)); }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_oauth_tokens_expires ON oauth_access_tokens(expires_at)'); } catch (e) { console.warn('[LCZOJ] oauth_access_tokens 索引创建失败：' + (e && e.message)); }
+
 /* ---------------- 迁移：内置管理员口令变更审计（v2.5.0 安全加固） ----------------
  * 背景：内置 admin 是站点的最后一道「后门」，它的口令变更必须可追溯 —— 任何成功的变更
  * （本人改密 / 超管重置 / 找回重置 / seed 初始化）与任何被拦截的越权尝试都要留痕。

@@ -478,7 +478,7 @@ const DAY_MS = 86400000;
  *  与排行榜 / 个人中心同一读取规则：manual / interval 优先读快照（无快照回退实时），
  *  realtime 始终实时 —— 保证「用户名颜色」与页面显示的积分永远出自同一口径。
  *
- *  性能（v2.9.0 优化）：每人对 computePoints 要做数次查询，实测 1371 人 **约 2.6 秒**；
+ *  性能（v2.9.1 优化）：每人对 computePoints 要做数次查询，实测 1371 人 **约 2.6 秒**；
  *  而前端（public/js/api.js）**每次页面加载都会请求一次** —— 于是首页每次都被这个接口拖住
  *  （实测首页 5.6 秒的长尾就是它，favicon 也一起被同一连接堵住）。
  *  这里改为 stale-while-revalidate 缓存：TTL 内直接返回；过期后**先返回旧值**、后台异步重算，
@@ -1290,7 +1290,7 @@ function unBrown(actor, targetId) {
  * 排行榜展示上限（v2.5.5）：站点排行榜只展示**前 500 名**（与 src/ranking.js 的 RANKING_CAP 同源）。
  * 用户数不足 500 时行为不变（total = 真实用户数）。
  */
-const RANKING_CAP = require('./ranking').RANKING_CAP;
+const { RANKING_CAP, attachAchievedAt } = require('./ranking');
 
 /** 等级分排行榜（最多前 500 名） */
 function getRatingRanking(query = {}) {
@@ -1321,7 +1321,7 @@ function getPointsRanking(query = {}) {
   const total = Math.min(RANKING_CAP, db.prepare('SELECT COUNT(*) AS c FROM users').get().c);
   // 已越过第 500 名：直接空列表（省掉全量积分计算）
   if ((page - 1) * size >= total) return { items: [], total, page, size, cap: RANKING_CAP };
-  const rows = db.prepare('SELECT id, username, nickname, role, avatar, brown_name, banned, can_speak, can_editorial FROM users ORDER BY id ASC').all();
+  const rows = db.prepare('SELECT id, username, nickname, role, avatar, brown_name, banned, can_speak, can_editorial, created_at FROM users ORDER BY id ASC').all();
   const ptsCache = new Map();                 // 同一请求内复用比赛实时榜单（见 computePoints）
   // 读取规则（见「全站积分结算」）：manual / interval 优先读快照，无快照的用户回退实时计算；realtime 全部实时
   const snap = pointsUseSnapshot() ? readPointsSnapshots() : null;
@@ -1339,6 +1339,7 @@ function getPointsRanking(query = {}) {
       banned: !!r.banned,
       points: pts.total,
       breakdown: pts.breakdown,
+      created_at: r.created_at,
     };
   });
   items.sort((a, b) => b.points - a.points || a.id - b.id);
@@ -1355,7 +1356,10 @@ function getPointsRanking(query = {}) {
     }
   });
   const capped = items.slice(0, RANKING_CAP);
-  return { items: capped.slice((page - 1) * size, page * size), total, page, size, cap: RANKING_CAP };
+  const pageItems = capped.slice((page - 1) * size, page * size);
+  // 「积分达成时间」：只对当前页 ≤30 行做一次聚合查询（口径见 src/ranking.js attachAchievedAt）
+  attachAchievedAt(pageItems);
+  return { items: pageItems, total, page, size, cap: RANKING_CAP };
 }
 
 /**

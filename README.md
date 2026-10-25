@@ -4,7 +4,7 @@
 > 全部功能基于 Node.js 内置模块实现：**无需 `npm install`、无需编译、无需独立数据库服务**，拷贝即可运行。
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.9.0-blue.svg" alt="Version 2.9.0">
+  <img src="https://img.shields.io/badge/Version-2.9.1-blue.svg" alt="Version 2.9.1">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%E2%89%A522.5-brightgreen" alt="Node.js ≥ 22.5"></a>
   <img src="https://img.shields.io/badge/Dependencies-Zero-orange" alt="零依赖">
@@ -190,7 +190,7 @@ node deploy/update.js --help      # 查看全部参数
 
 | 模块 | 特性 |
 | --- | --- |
-| **用户系统** | 注册 / 登录 / 会话保持、`scrypt` 密码哈希、唯一数字 UID（**删除后编号释放复用**）、邮箱验证（SMTP；**未完成验证不创建账号**，验证码只发到邮箱）、忘记密码 |
+| **用户系统** | 注册 / 登录 / 会话保持、`scrypt` 密码哈希、唯一数字 UID（**删除后编号释放复用**）、邮箱验证（SMTP；**未完成验证不创建账号**，验证码只发到邮箱）、忘记密码、**OAuth 2.0 授权登录**（供 Lith Tools 等第三方站点使用 LCZOJ 账号登录，密码与会话不共享） |
 | **权限模型** | 8 项权限位（题目 / 用户 / 题解审核 / 专栏审核 / 比赛 / 讨论 / 专栏 / 题解），全部勾选即超级管理员；操作留痕并通知本人 |
 | **题库与评测** | Markdown + LaTeX 题面（内置渲染 + KaTeX 增强）、标签与难度筛选、子任务计分（sum / min / max / bundle）、题目级与提交级 O2 开关、**四种题目类型（普通题 / 提交答案 / 交互题 · IO / 交互题 · 函数式）**、Special Judge（四种类型共用同一个开关，交互题同样可开）、大数据包评测（超过 16KB 不预览但完整评测）；**题目批量导出 / 导入**（勾选导出、导入预检、同名冲突策略、跨站点迁移） |
 | **提交方式** | 在线代码编辑器（长代码粘贴与渲染优化）、上传源码文件或拖拽文件并自动识别语言；提交答案题支持上传答案文件或 ZIP |
@@ -262,6 +262,11 @@ node deploy/update.js --help      # 查看全部参数
 | `LCZOJ_PUBLIC_IP` | 自动识别 | 部署脚本输出的访问地址所用公网 IP（自动识别失败时可手动指定） |
 | `OJ_UPDATE_URL` | Gitee（官方仓库） | 版本检查地址。Gitee（默认）：`https://gitee.com/lichenzhen0713/LCZOJ/raw/master/package.json`；GitHub（备用）：`https://raw.githubusercontent.com/lichenzhen0713/LCZOJ/master/package.json`（多个地址用逗号分隔） |
 | `OJ_UPDATE_ZIP_URL` | Gitee（官方仓库） | 源码包下载地址。Gitee（默认）：`https://gitee.com/lichenzhen0713/LCZOJ/repository/archive/master.zip`；GitHub（备用）：`https://github.com/lichenzhen0713/LCZOJ/archive/refs/heads/master.zip`（多个地址用逗号分隔） |
+| `OJ_OAUTH_CLIENT_ID` / `OJ_OAUTH_CLIENT_SECRET` | 空 | OAuth 2.0 客户端标识与密钥（供 Lith Tools 授权登录；不配置则关闭） |
+| `OJ_OAUTH_CLIENT_NAME` | `Lith Tools` | 授权页展示的第三方应用名 |
+| `OJ_OAUTH_REDIRECT_URIS` | 空 | 允许的回调地址，多个用逗号 / 空格分隔；必须与第三方配置完全一致 |
+
+> 本地开发可以把上述变量写进项目根目录的 `.env`（已 gitignore），启动时自动加载；面板部署写入 `deploy/panel.env` 或面板环境变量。
 
 ---
 
@@ -338,6 +343,7 @@ data/                  运行时数据（自动生成）
 | [docs/LANGUAGES.md](docs/LANGUAGES.md) | 多语言配置：工具链安装、新增语言、判题参数 |
 | [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md) | 自定义指南：外观、权限、积分扩展、Special Judge |
 | [docs/INTERACTIVE.md](docs/INTERACTIVE.md) | **交互题**：IO 交互 / 函数式交互的配置步骤、写法要点与判题规则 |
+| [docs/OAUTH.md](docs/OAUTH.md) | **OAuth 2.0 授权登录**：为 Lith Tools 等第三方站点提供 LCZOJ 登录授权 |
 | [docs/FAQ.md](docs/FAQ.md) | 常见问题解答 |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | 贡献指南 |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | 版本日志：每次更新的记录 |
@@ -348,8 +354,9 @@ data/                  运行时数据（自动生成）
 
 ## 版本日志
 
-当前版本 **v2.9.0**（`package.json`、系统设置页、启动日志三处一致）。完整版本线 **v0.1.0 → v0.7.0**（v1.0.0 之前的历代版本，编号按改动大小重新分配）**→ v1.0.0 → v2.9.0**。
+当前版本 **v2.9.1**（`package.json`、系统设置页、启动日志三处一致）。完整版本线 **v0.1.0 → v0.7.0**（v1.0.0 之前的历代版本，编号按改动大小重新分配）**→ v1.0.0 → v2.9.1**。
 
+- **v2.9.1** 积分排行榜新增「积分达成时间」列（显示该用户最近一次得分时间）；用户名黄名改为 #ead80e。
 - **v2.9.0** 首页加载更流畅；提交「用时」统一按各测试点用时之和显示；「社区管理」恢复为公开页（未登录也能查看）；修复自动积分结算拖慢访问、暗黑模式副标题重影等问题；站点 Logo 与外观细节调整。
 - **v2.8.8** 站点图标再次放大（侧栏默认 56px、首页 112/96/80px）；favicon 去掉多余空白后图形更大；网站黄色恢复为更亮的 #fae607。
 - **v2.8.7** 站点图标放大（侧栏默认 40px、首页 84/64px，滑块 18~72 可调）；首页卡片去掉描边；「社区管理」改为「用户权限变更记录」，只公示权限变更（含棕名），其它分类不再出现。
@@ -359,7 +366,6 @@ data/                  运行时数据（自动生成）
 - **v2.8.3** 后台已处理的反馈可「再次处理」（预填上次回复、记录处理次数与上次处理人）；每次处理反馈都会站内通知提交者（含二次处理）。
 - **v2.8.2** 整理「邮箱与验证」设置界面；「全站积分结算」独立成「系统设置 → 积分结算」二级页面；题目测试数据过大时输入框改为只读。
 - **v2.8.1** 修复浏览器标题被清成只剩站点名的问题；「邮箱与验证」的授权码（SMTP 密码）改为一直显示、可直接修改（清空即不使用）。
-- **v2.8.0** 支持自定义网站图标（favicon，上传后标签页图标即时更新、可恢复默认）；每个测试点默认时限改为「题目时限 × 1.2」并在评测设置里可调（1.0~3.0）；修复积分结算遇到数据库繁忙时整批丢失的问题。
 - 更早版本（v0.1.0 ~ v2.6.3）见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
 ---

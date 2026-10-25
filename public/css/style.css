@@ -5745,3 +5745,362 @@ body.dark .code-box code * {
   background: transparent !important;
   background-color: transparent !important;
 }
+
+/* =====================================================================
+   v2.9.0 首页「快捷入口」视觉优化（只改外观：入口数量 / 链接 / 文案一字未动）
+   ---------------------------------------------------------------------
+   改前（基干 style.css:211 起 + 后续追加的 1044 / 4275 两轮）：
+     · .quick-item 背景 #fbfcfe、圆角 12px、图标 34×34 + 10px 圆角，
+       六个入口的图标底**同一个浅蓝 #eef4fb**，只有图标字形用各自的 --qi；
+     · 悬停只换描边/文字/图标填充，卡片之间没有高低层次；
+     · 暗色下 body.dark .quick-item 用 rgba(255,255,255,.06) + .10 描边，
+       与玻璃卡片底几乎同色，几乎看不出「块」，且该规则带
+       box-shadow:none !important，把悬停上浮的阴影也一起抹掉了。
+   改后（本节全部是**视觉层**覆盖，追加在文件末尾，前文一字未改）：
+     1) 两列等宽等高：grid-template-columns:repeat(2,minmax(0,1fr)) +
+        grid-auto-rows:1fr + 统一 min-height:64px / padding:12px 14px；
+     2) 图标统一 40×40、12px 圆角底块，底色取该入口自己的 --qi 的 12% 淡色
+        （color-mix），图标与文字在 64px 行高内同心中线对齐（不靠 magic number）；
+     3) 悬停：translateY(-2px) + var(--shadow-hover) + 该入口 --qi 描边，
+        图标反白（底色填满 --qi、字形 #fff），过渡 .15s ease；
+     4) 暗色：块底不透明 #1b2230（避免浅色底块透出）、描边 rgba(255,255,255,.12)、
+        图标底 = --qi 22% 混色、字形 = --qi 提亮 68%（暗底上仍清晰），
+        悬停用 --qi 描边 + 深色投影，亮/暗两套都是「同形状，只换配色」；
+     5) 窄屏 ≤430px 收到 60px 档（图标 36、间距 10），两列在 390px 下仍然成立；
+        文字单行省略号兜底，并给 .quick-item 补 min-width:0，
+        断开 grid 项 min-content 约束 ⇒ 三档宽度都不会横向溢出。
+   颜色全部取自既有变量（--text / --text-light / --border / --shadow-hover /
+   --radius / 入口自带的 --qi），不引入新字体、不引入任何外部图片或 CDN。
+   ===================================================================== */
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  grid-auto-rows: 1fr;          /* 同一行内（及所有行）卡片等高 */
+}
+
+.quick-item {
+  min-width: 0;                 /* 断开 grid 项的 min-content 约束，长文案由省略号接管 */
+  display: flex;
+  align-items: center;          /* 图标盒与单行文字同心中线对齐 */
+  gap: 12px;
+  min-height: 64px;
+  padding: 12px 14px;
+  border-radius: 14px;          /* 介于 --radius(12) 与卡片 --radius-lg(16) 之间 */
+  border: 1px solid color-mix(in srgb, var(--qi, var(--accent)) 18%, var(--border));
+  background: #ffffff;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, .04);
+  transition: transform .15s ease, box-shadow .15s ease,
+              border-color .15s ease, color .15s ease, background .15s ease;
+}
+.quick-item > i {
+  width: 40px; height: 40px; flex: 0 0 40px;
+  border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--qi, var(--accent)) 12%, transparent);
+  color: var(--qi, var(--accent));
+  font-size: 17px; line-height: 1;
+  transition: background .15s ease, color .15s ease;
+}
+.quick-item > span {
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  line-height: 1.25;
+}
+.quick-item:hover {
+  transform: translateY(-2px);
+  border-color: var(--qi, var(--accent));
+  color: var(--qi, var(--accent));
+  background: #ffffff;
+  box-shadow: var(--shadow-hover);
+}
+.quick-item:hover > i { background: var(--qi, var(--accent)); color: #fff; }
+.quick-item:active { transform: translateY(0); }
+.quick-item:focus-visible { outline: 2px solid var(--qi, var(--accent)); outline-offset: 2px; }
+
+/* 暗色：块底不透明、描边可见、图标用入口色的提亮混色（亮底块绝不会透出来） */
+body.dark .quick-item {
+  background: #1b2230 !important;
+  border-color: rgba(255, 255, 255, .12) !important;
+  color: var(--text) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .45) !important;
+}
+body.dark .quick-item > i {
+  background: color-mix(in srgb, var(--qi, var(--accent)) 22%, transparent) !important;
+  color: color-mix(in srgb, var(--qi, var(--accent)) 68%, #fff) !important;
+}
+body.dark .quick-item:hover {
+  background: #1e2735 !important;
+  border-color: color-mix(in srgb, var(--qi, var(--accent)) 78%, transparent) !important;
+  color: color-mix(in srgb, var(--qi, var(--accent)) 68%, #fff) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .5), 0 22px 40px -20px rgba(0, 0, 0, .8) !important;
+}
+body.dark .quick-item:hover > i { background: var(--qi, var(--accent)) !important; color: #fff !important; }
+
+/* 窄屏：两列仍然成立，收紧到 60px 档（390px 下每格 165px，图标 36 + 间距 10 + 单行文字不挤） */
+@media (max-width: 430px) {
+  .quick-grid { gap: 8px; }
+  .quick-item {
+    min-height: 58px;
+    padding: 10px 11px;
+    gap: 10px;
+    border-radius: 12px;
+    font-size: 13.5px;
+  }
+  .quick-item > i { width: 36px; height: 36px; flex-basis: 36px; border-radius: 11px; font-size: 16px; }
+}
+
+/* 尊重系统「减少动态效果」设置（与站内其它动效区块一致） */
+@media (prefers-reduced-motion: reduce) {
+  .quick-item, .quick-item > i { transition: none; }
+  .quick-item:hover { transform: none; }
+}
+
+/* v2.9.1：仅黄名（用户名黄色档）改用 #ead80e。
+   --yellow（IOI 分数档 / CE 判定色 / 测试点方块）保持 #fae607 不变，此处只覆盖 --uc-yellow。 */
+:root { --uc-yellow: #ead80e; }
+
+/* =====================================================================
+   v2.9.1 修复：首页第一块（顶部 hero 毛玻璃面板）圆角被归零 → 90° 方角
+   ---------------------------------------------------------------------
+   现象（站长反馈：「首页第一个方框圆角效果出了问题」）：
+     亮色主题下，首页最上面那块大面板圆角为 0，四角是硬直角；
+     而同一屏里其它方框都是圆角（卡片 16px、统计块 14px、搜索条 999px），
+     所以第一块看起来明显「没跟上」，且因为它带 20px 毛玻璃模糊 + 大面积蓝色投影，
+     方角比普通的直角块更扎眼。
+
+   根因（两条历史规则互相覆盖，只压到圆角、没压到底色）：
+     · style.css:2955-2964  body:not(.dark) .home-hero
+         40% 白底 + 三色径向光晕 + 1px 白描边 + 大蓝投影（全部 !important，
+         特异性 0,2,1）→ 亮色下这块面板依然被完整画出来；
+     · style.css:5333-5340  .home-hero, body.dark .home-hero
+         去描边 / 去底色 / 去阴影 / border-radius: 0 !important（.home-hero 特异性 0,1,0）
+         → 底色、描边、阴影因为特异性低于上面那条而**没能去掉**，只把圆角归零了。
+     结果就是「面板还在、圆角没了」。暗色下 5334 的 background:transparent 才是真正生效的，
+     整块面板不存在，所以这个方角只有亮色看得见（= 明暗不一致的由来）。
+
+   修法：在文件末尾用同档 !important 把圆角还原，档位沿用本文件历史设计值
+     —— style.css:1246 桌面 18px、style.css:3404 中窄屏（≤760px）16px；
+   只动 border-radius 一个属性，底色 / 描边 / 阴影 / 布局 / 文字一律不动。
+   六个「快捷入口」卡片（.quick-item，14px / ≤430px 12px）本身六张完全一致，无需改动。
+   ===================================================================== */
+.home-hero,
+body:not(.dark) .home-hero,
+body.dark .home-hero { border-radius: 18px !important; }
+
+@media (max-width: 760px) {
+  .home-hero,
+  body:not(.dark) .home-hero,
+  body.dark .home-hero { border-radius: 16px !important; }
+}
+
+
+/* =====================================================================
+   v2.9.1 修复（站长：「第一个方框的外观有问题，白天和夜间模式都有，
+   要和其它方框一致」）：把首页 .home-hero 改成和站内普通卡片 .card 完全一致。
+   ---------------------------------------------------------------------
+   改前实测（Chrome，1440）两套主题下 hero 与卡片都差 6 项里的 5～6 项：
+     · 亮色 hero：42% 白底 + 三色高饱和径向光晕 + 78% 白描边 + 蓝色大投影，
+       比下面的「最近比赛」卡片明显更蓝、更亮；
+     · 暗色 hero：被 style.css:5333 压成「透明底 / 无描边 / 无阴影 / 圆角 0」，
+       只剩一层模糊，几乎没有面板边界；而卡片是深底 + 细描边 + 有阴影的清晰面板
+       → 明暗两种主题下，第一块都不像站内其它方框。
+
+   实测参照卡片（首页第一张 .card「最近比赛」的计算值，改前 / 改后都一样）：
+     亮色  background-color rgba(255,255,255,.5)（= var(--card)）
+           background-image linear-gradient(120deg,…)+radial-gradient(130% 120% at 100% 0%,…)
+           border 1px solid rgba(255,255,255,.65)
+           border-radius 16px（≤760px 为 14px，见 style.css:3369）
+           box-shadow 0 6px 20px -14px rgba(24,60,130,.35)
+           backdrop-filter blur(16px) saturate(1.4)
+     暗色  background-color rgba(24,30,43,.66)（= var(--card)）
+           background-image linear-gradient(130deg,…)+2 层 radial-gradient
+           border 1px solid rgba(255,255,255,.09)
+           border-radius 16px（≤760px 为 14px）
+           box-shadow 0 6px 22px -14px rgba(0,0,0,.6)
+           backdrop-filter blur(16px) saturate(1.4)
+
+   说明：本站默认主题是「液态毛玻璃」（style.css 文件头的 @supports 段），
+   所以 .card 的最终计算值本身带渐变 + 16px 模糊，并不是纯 var(--card) 实心块。
+   这里按「与参照卡片逐一相同」取实测值（底色仍用 var(--card)，暗色自动跟随），
+   而不是凭空改成实心卡 —— 否则会与同屏其它方框再次不一致。
+
+   特异性：(0,3,2)，压过
+     · style.css:2955  body:not(.dark) .home-hero  （0,2,1，全 !important）
+     · style.css:5333  .home-hero / body.dark .home-hero（0,1,0 / 0,2,1）
+     · style.css:5890  上一版只修圆角的规则（同档 !important，后写生效）
+   只覆盖这 6 项外观；内边距、布局、文字、四个统计块一律不动。
+   ===================================================================== */
+html body:not(.dark) .home-hero[class] {
+  background-color: var(--card) !important;
+  background-image:
+    linear-gradient(120deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, .06) 32%, rgba(255, 255, 255, 0) 60%),
+    radial-gradient(130% 120% at 100% 0%, rgba(90, 150, 255, .10), transparent 55%) !important;
+  border: 1px solid rgba(255, 255, 255, .65) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: 0 6px 20px -14px rgba(24, 60, 130, .35) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.4) !important;
+  backdrop-filter: blur(16px) saturate(1.4) !important;
+}
+
+html body.dark .home-hero[class] {
+  background-color: var(--card) !important;
+  background-image:
+    linear-gradient(130deg, rgba(130, 170, 255, .10), rgba(255, 255, 255, .02) 34%, rgba(255, 255, 255, 0) 62%),
+    radial-gradient(130% 120% at 100% 0%, rgba(120, 90, 255, .14), transparent 55%),
+    radial-gradient(120% 100% at 0% 100%, rgba(40, 160, 235, .10), transparent 55%) !important;
+  border: 1px solid rgba(255, 255, 255, .09) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: 0 6px 22px -14px rgba(0, 0, 0, .6) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.4) !important;
+  backdrop-filter: blur(16px) saturate(1.4) !important;
+}
+
+/* 窄屏（≤760px）：与 .card 同步收细到 14px（style.css:3369 手机端卡片档位） */
+@media (max-width: 760px) {
+  html body:not(.dark) .home-hero[class],
+  html body.dark .home-hero[class] { border-radius: 14px !important; }
+}
+
+
+/* =====================================================================
+   v2.9.1 修复：首页毛玻璃（站长：「首页外观毛玻璃效果有问题，修复」）
+   ---------------------------------------------------------------------
+   一、诊断结论（无头 Chrome + CDP 实测，1440，亮/暗两套主题）
+     · CSS.supports('backdrop-filter','blur(1px)') = true；
+       hero 与「最近比赛」卡片计算值都是 blur(16px) saturate(1.4)。
+       → 浏览器支持、属性也确实生效，不是"没生效"。
+     · 祖先链 main#app → div.layout → body → html 全部
+       filter:none / opacity:1 / transform:none / will-change:auto /
+       contain:none / isolation:auto，没有 backdrop root 被创建。
+       → 排除"被祖先破坏"。
+     · 关键实测：把 hero 的 backdrop-filter 临时关成 none，再与正常态逐像素比对，
+       左右两条空白带（无文字的纯面板区）**0% 的像素变化超过 2 级**（亮色），
+       暗色 6.3% → 模糊半径改成 0 也看不出来。
+       原因：hero 背后只有 body::before 的平滑径向光晕
+       （相邻像素平均亮度差仅 0.0036/灰阶），没有高频细节可模糊。
+       → 属于「(b) 生效了但背后无可模糊内容」，观感上等于一块半透明奶白板。
+     · 亮色实测：hero 内部 rgb(236,247,255) vs 页面底色 rgb(215,221,245)，
+       面板比页面更亮 —— 50% 白底 + 0.5 白色高光渐变把它洗成一张"奶白纸"。
+     · 描边 1px rgba(255,255,255,.65) 在浅底上与页面只差 1.06:1
+       （暗色 1.15:1，卡片同为 1.11:1），投影 0 6px 20px -14px 也几乎不可见
+       → 既没有清晰描边，也没有高光和层次，玻璃质感无从谈起。
+     · 文字没问题是：h1 15.13:1、副标题 13.65:1、搜索框 16.59:1（AA 4.5:1）。
+       只有搜索框占位符 4.31:1 略低于 AA，本段一并修掉。
+
+   二、修法（只动"外观"，不动任何尺寸）
+     1) 底板更透 + 冷色微光、白色镜面高光收窄：
+        亮 rgba(248,252,255,.38)（原 .5）、暗 rgba(24,30,43,.58)（原 .66），
+        让页面本身的蓝/紫光晕真正透出来，不再是纯白奶板。
+     2) 清晰描边：1px 95% 白亮边 + 外侧 1px 冷灰细线（0 0 0 1px
+        rgba(104,136,190,.24)），浅色底上也能看见面板边缘。
+     3) 内高光 + 真投影：inset 0 1px 0 白色高光、inset 0 0 0 1px 内亮环，
+        外加 0 20px 42px -26px 的柔和投影 —— 面板从页面"浮"起来。
+     4) backdrop-filter 的 saturate 提到 2.1（亮）/1.8（暗）：
+        在这套平滑背景上模糊抓不到细节，饱和度才是 backdrop-filter 里
+        唯一肉眼可见的部分，提高它 = 面板把背后的色晕"提纯"后透出来。
+     5) hero 与同屏卡片（.home-grid .card）共用**同一组数值**
+        —— 同样 alpha、同样描边、同样阴影、同样 blur，同屏观感一致。
+     6) 亮色搜索框占位符 #7b8794 → #4f5b70，对比度 4.31:1 → 约 7:1。
+
+   三、特异性与影响面
+     (0,3,2)，压过 style.css:5937 / 5949（同档、后写生效）、
+     2955 body:not(.dark) .home-hero（0,2,1）、2798 .home-hero（0,1,0）、
+     5333 去底色的历史规则；只覆盖背景 / 描边 / 阴影 / backdrop-filter 四项，
+     padding、margin、字号、border-width（仍 1px）一律不碰 → 布局零位移。
+   ===================================================================== */
+html body:not(.dark) .home-hero[class],
+html body:not(.dark) .home-grid .card[class] {
+  background-color: rgba(248, 252, 255, .38) !important;
+  background-image:
+    radial-gradient(135% 130% at 4% -20%, rgba(24, 144, 255, .10), transparent 58%),
+    radial-gradient(130% 120% at 104% 6%, rgba(124, 90, 255, .09), transparent 56%),
+    linear-gradient(118deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, .04) 22%, rgba(255, 255, 255, 0) 42%) !important;
+  border: 1px solid rgba(255, 255, 255, .95) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .95),
+    inset 0 0 0 1px rgba(255, 255, 255, .32),
+    0 0 0 1px rgba(104, 136, 190, .24),
+    0 20px 42px -26px rgba(24, 60, 130, .52) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(2.1) !important;
+  backdrop-filter: blur(16px) saturate(2.1) !important;
+}
+
+html body.dark .home-hero[class],
+html body.dark .home-grid .card[class] {
+  background-color: rgba(24, 30, 43, .58) !important;
+  background-image:
+    linear-gradient(132deg, rgba(150, 185, 255, .13), rgba(255, 255, 255, .03) 30%, rgba(255, 255, 255, 0) 58%),
+    radial-gradient(130% 120% at 100% 0%, rgba(120, 90, 255, .17), transparent 55%),
+    radial-gradient(120% 100% at 0% 100%, rgba(40, 160, 235, .11), transparent 55%) !important;
+  border: 1px solid rgba(255, 255, 255, .14) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .10),
+    inset 0 0 0 1px rgba(255, 255, 255, .04),
+    0 1px 2px rgba(0, 0, 0, .4),
+    0 20px 44px -26px rgba(0, 0, 0, .7) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.8) !important;
+  backdrop-filter: blur(16px) saturate(1.8) !important;
+}
+
+/* 亮色首页搜索框占位符：原 #7b8794 在白色胶囊上只有 4.31:1，加深到 ~7:1 */
+html body:not(.dark) .home-hero .hero-search .input::placeholder { color: #4f5b70 !important; opacity: 1 !important; }
+
+/* =====================================================================
+   v2.9.1 修正（站长："每个方框旁边都有小白边，不合适"）
+   ---------------------------------------------------------------------
+   上一版给卡片/hero 加了「1px 95% 白亮边 + 顶部白色内高光 + 内亮环 + 外侧冷灰细线」，
+   观感上每张卡片边缘都多出一条白线 —— 站长认为不合适。
+   现在：描边一律改为**透明**（保留 1px 宽度占位，零布局位移），
+         去掉所有 inset 白色高光/内亮环，阴影只保留**纯外投影**用于层次分离。
+   选择器的特异性 (0,3,2) 与更早追加的玻璃规则相同、但位置更靠后 → 后者生效。
+   ===================================================================== */
+html body:not(.dark) .card[class],
+html body.dark .card[class],
+html body:not(.dark) .home-hero[class],
+html body.dark .home-hero[class] {
+  border-color: transparent !important;
+}
+
+html body:not(.dark) .card[class],
+html body:not(.dark) .home-hero[class] {
+  box-shadow: 0 10px 28px -20px rgba(24, 60, 130, .42) !important;
+}
+
+html body.dark .card[class],
+html body.dark .home-hero[class] {
+  box-shadow: 0 10px 30px -20px rgba(0, 0, 0, .68) !important;
+}
+
+/* ---------------------------------------------------------------------
+   v2.9.1 修正（第二轮）：上面那组透明描边规则特异性 (0,3,2) 压不过更早追加的
+   html body:not(.dark) .home-grid .card[class]（0,4,2），实测首页卡片仍是
+   rgba(255,255,255,.95) 白边 + 白色 inset 高光。这里用**同级或更高**特异性重写：
+     · 全站 .card：透明描边 + 纯外投影（去掉白色内高光/内亮环/外侧冷灰线）
+     · 首页 .home-grid .card：(0,4,2) 显式覆盖那条旧规则
+     · .home-hero：保持透明描边 + 纯外投影
+   ===================================================================== */
+html body .card[class],
+html body:not(.dark) .card[class],
+html body.dark .card[class],
+html body:not(.dark) .home-grid .card[class],
+html body.dark .home-grid .card[class],
+html body:not(.dark) .home-hero[class],
+html body.dark .home-hero[class] {
+  border-color: transparent !important;
+}
+
+html body:not(.dark) .home-grid .card[class],
+html body:not(.dark) .home-hero[class],
+html body:not(.dark) .card[class] {
+  box-shadow: 0 10px 28px -20px rgba(24, 60, 130, .42) !important;
+}
+
+html body.dark .home-grid .card[class],
+html body.dark .home-hero[class],
+html body.dark .card[class] {
+  box-shadow: 0 10px 30px -20px rgba(0, 0, 0, .68) !important;
+}

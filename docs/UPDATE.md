@@ -200,7 +200,7 @@ git pull
 docker compose up -d --build
 ```
 
-镜像标签为 `lczoj:<版本号>`（例如 `lczoj:2.9.0`），旧标签会保留在本机，可用于回滚：
+镜像标签为 `lczoj:<版本号>`（例如 `lczoj:2.9.1`），旧标签会保留在本机，可用于回滚：
 
 ```bash
 # 查看本机已有镜像

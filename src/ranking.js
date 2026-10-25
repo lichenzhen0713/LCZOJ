@@ -12,6 +12,29 @@ const { parsePagination } = require('./util');
  */
 const RANKING_CAP = 500;
 
+/**
+ * 批量补「积分达成时间」（v2.9.1，题库 AC 榜与积分榜共用）：
+ *   口径 = 该用户**所有 AC 提交**（含赛时提交）中 created_at 的最大值；
+ *          从未 AC 则回退其注册时间 users.created_at。
+ *   实现 = **一次**聚合查询，且只查当前页这 ≤30 个 user_id（IN 列表）——
+ *          既不逐行查询（N+1），也不为了一页数据去 GROUP BY 全表 4.5 万行。
+ * 传入的 item 需带 id 与 created_at（注册时间，作回退值）；结果写回 item.achieved_at。
+ */
+function attachAchievedAt(items) {
+  if (!items || !items.length) return items;
+  const ids = items.map((x) => x.id).filter((x) => Number.isInteger(x));
+  if (!ids.length) return items;
+  const rows = db.prepare(`
+    SELECT user_id, MAX(created_at) AS last_ac_at
+    FROM submissions
+    WHERE verdict = 'Accepted' AND user_id IN (${ids.map(() => '?').join(',')})
+    GROUP BY user_id
+  `).all(...ids);
+  const map = new Map(rows.map((x) => [x.user_id, x.last_ac_at]));
+  for (const it of items) it.achieved_at = map.get(it.id) || it.created_at || null;
+  return items;
+}
+
 /** 题库 AC 排行榜（分页，最多前 500 名） */
 function getRanking(query = {}) {
   const { page, size, offset } = parsePagination(query, 30, RANKING_CAP);
@@ -32,18 +55,18 @@ function getRanking(query = {}) {
     LIMIT ? OFFSET ?
   `).all(limit, offset);
 
-  return {
-    items: rows.map((r, i) => ({
-      rank: offset + i + 1,
-      id: r.id,
-      username: r.username,
-      bio: r.bio,
-      solved: r.solved,
-      submits: r.submits,
-      created_at: r.created_at,
-    })),
-    total, page, size, cap: RANKING_CAP,
-  };
+  // 「积分达成时间」：与积分排行榜（src/users.js getPointsRanking）同口径，一次聚合查询补齐。
+  const items = rows.map((r, i) => ({
+    rank: offset + i + 1,
+    id: r.id,
+    username: r.username,
+    bio: r.bio,
+    solved: r.solved,
+    submits: r.submits,
+    created_at: r.created_at,
+  }));
+  attachAchievedAt(items);
+  return { items, total, page, size, cap: RANKING_CAP };
 }
 
-module.exports = { getRanking, RANKING_CAP };
+module.exports = { getRanking, attachAchievedAt, RANKING_CAP };
