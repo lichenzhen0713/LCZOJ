@@ -1396,9 +1396,23 @@ function batchDelete(adminId, body) {
     db.prepare("DELETE FROM notifications").run();
     db.prepare("DELETE FROM moderation_logs").run();
     db.prepare("DELETE FROM users WHERE username != 'admin'").run();
+    // v2.9.1 修复（站长反馈"清除数据后等级分和积分没有清零"）：
+    // 上面只删了内容表，漏掉了与分数直接相关的三处 ——
+    //   · users.rating / rated_games：admin 行会被保留，等级分留在上面 ✗
+    //   · rating_history：等级分变更历史（每场 Rated 一条）✗
+    //   · points_settlement：四维积分快照（非 realtime 模式排行榜直接读它）✗
+    // 于是"回到首次启动状态"之后，等级分与积分看起来还在 ✗。这里一并清零。
+    db.prepare("UPDATE users SET rating = 0, rated_games = 0").run();
+    db.prepare("DELETE FROM rating_history").run();
+    db.prepare("DELETE FROM points_settlement").run();
+    // 结算状态（上次结算时间/耗时/覆盖人数）也属于"运行状态"而非用户设置 → 清掉，避免界面显示旧数字
+    try {
+      const s = require('./settings');
+      for (const k of ['points_settle_last_run', 'points_settle_last_ms', 'points_settle_last_users']) s.setSetting(k, '');
+    } catch { /* settings 不可用则忽略，不影响清理 */ }
     // 重置 problems 自增，使新题目从 1 开始
-    db.exec("DELETE FROM sqlite_sequence WHERE name IN ('problems','submissions','editorials','discussions','contests','feedbacks','users')");
-    return { ok: true, cleared: true };
+    db.exec("DELETE FROM sqlite_sequence WHERE name IN ('problems','submissions','editorials','discussions','contests','feedbacks','users','rating_history')");
+    return { ok: true, cleared: true, reset_scores: true };
   }
   const table = map[type];
   if (!table) return { error: '无效的删除类型' };

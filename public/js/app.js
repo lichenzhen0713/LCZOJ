@@ -954,7 +954,8 @@ async function route() {
     // 旧地址 #/admin/cleanup 与 #/admin/batch-* 保留为重定向，不留死链接；`?c=` 之类的查询串由 nav() 带走。
     // v2.8.5：「积分计算」（原「全站积分结算」）不再是系统设置下与「功能设置」平级的一级分区，
     // 而是**「功能设置」的二级页面** #/settings/features/points —— 页头仍走 settingsTabs('features', …, 'points')，
-    // 子标签里父项「功能设置」保持可见、子项「积分计算」为当前项，侧边栏高亮「系统设置」（renderTopbar 按 parts[1]==='settings' 判定）。
+    // 子页签里父项「功能设置」保持可见、子项「积分设置」为当前项，侧边栏高亮「系统设置」（renderTopbar 按 parts[1]==='settings' 判定）。
+    if (parts[0] === 'settings' && parts[1] === 'features' && parts[2] === 'switches') { await renderAdminFeatureSwitches(); return; }
     if (parts[0] === 'settings' && parts[1] === 'features' && parts[2] === 'points') { await renderAdminPointsSettle(); return; }
     // 旧的 #/settings/points（一级地址）保留为重定向，不留死链。
     if (parts[0] === 'settings' && parts[1] === 'points') { nav('settings/features/points'); return; }
@@ -7939,12 +7940,14 @@ const SETTINGS_PAGE_LINKS = [
   { key: 'batch-delete', name: '批量删除', icon: 'fa-triangle-exclamation', href: '#/settings/batch-delete' },
 ];
 /** 一级分区下的**二级页面**（v2.8.5）：父分区 key → 子页面列表。
- *  渲染位置：在 settingsTabs 里紧跟父项（父项保持可见、可点回父页面），子项本身才是「当前项」；
+ *  渲染位置：settingsTabs 在分块按钮行下方再渲染一行子页签（与后台「文章审核 / 分类管理」
+ *  完全同一套 .tag-chips.admin-subtabs + .chip），父项「功能设置」始终可见、可点回父页面；
  *  地址形如 #/settings/<父 key>/<子 key>，路由与侧边栏高亮仍按 parts[1]==='settings' 走「系统设置」。
- *  目前只有「功能设置 → 积分计算」一项（站长要求：积分计算是功能设置的二级页面）。 */
+ *  v2.9.2：站长要求把原「积分计算」二级页面拆成「功能开关 / 积分设置」两个页面（顺序固定）。 */
 const SETTINGS_SUBPAGES = {
   features: [
-    // v2.9.0：站长要求删除上方导航里的「积分计算」子项 —— 入口只保留「功能设置」卡片里的那个按钮
+    { key: 'switches', name: '功能开关', icon: 'fa-toggle-on', href: '#/settings/features/switches' },
+    { key: 'points', name: '积分设置', icon: 'fa-calculator', href: '#/settings/features/points' },
   ],
 };
 const SETTINGS_DEFAULT_SECTION = 'appearance';
@@ -7960,39 +7963,51 @@ async function siteVersion() {
 /** 系统设置的分块导航：走后台统一页头（adminHead）——大标题在最上面、版本号与右侧链接跟在标题同行，
  *  说明文字在标题下方，分块按钮作为「子标签」紧跟其后；因此系统设置各页与其它后台页面标题位置一致。
  *  v2.8.5：第三参数 sub 表示「二级页面」（如 active='features', sub='points' → #/settings/features/points）。
- *  此时**父项与子项都会渲染在子标签行里**：父项「功能设置」保持可见（btn-ghost，点回父页面），
- *  子项「积分计算」紧跟其后并作为当前项高亮（btn + aria-current），中间用 › 表示归属关系。 */
+ *  v2.9.2：二级页面不再塞进分块按钮行，而是在下面单独渲染一行**子页签**
+ *  （`.tag-chips.admin-subtabs` + `.chip`，与专栏管理的「文章审核 / 分类管理」同一套样式）：
+ *    · 父项「功能设置」恒在第一个（可点回父页面），父页面本身（sub 为空）高亮父项；
+ *    · 两个子页「功能开关 / 积分设置」依次排列，当前页高亮，中间用 › 表示归属关系。
+ *  这样「功能设置」的分块按钮与「功能开关 / 积分设置」的子页签层次清楚，又不会破坏其它设置页。 */
 function settingsTabs(active, version, sub) {
   const allKeys = [...SETTINGS_SECTIONS.map((s) => s.key), ...SETTINGS_PAGE_LINKS.map((p) => p.key)];
-  const subItem = (sub && (SETTINGS_SUBPAGES[active] || []).find((x) => x.key === sub)) || null;
+  const subpages = SETTINGS_SUBPAGES[active] || [];
+  // v2.9.2（站长）：父页面（sub 为空）默认选中**第一个子页**（功能开关），避免子页签全不高亮；
+  // 子页地址（sub 有值）仍按实际页高亮。
+  const subItem = (sub && subpages.find((x) => x.key === sub)) || (subpages.length ? subpages[0] : null);
   // 当前项：二级页面用「父/子」键，否则为一级分区键（非法值回落到默认分区）
   const cur = subItem ? `${active}/${sub}` : (allKeys.includes(active) ? active : SETTINGS_DEFAULT_SECTION);
   const items = [];
   for (const s of SETTINGS_SECTIONS) {
     items.push({ key: s.key, name: s.name, icon: s.icon, href: '#/settings/' + s.key });
-    // 二级页面紧跟自己的父项插入，读起来就是「功能设置 › 积分计算」
-    if (subItem && s.key === active) {
-      items.push({ key: cur, name: subItem.name, icon: subItem.icon, href: subItem.href, child: true, parentName: s.name });
-    }
   }
   for (const p of SETTINGS_PAGE_LINKS) items.push({ key: p.key, name: p.name, icon: p.icon, href: p.href });
   // 分块按钮与后台子标签用同一套骨架（.admin-subtabs）：位置固定在标题（与说明）之后、内容之前
   const chips = `<div class="row settings-nav-chips admin-subtabs" style="gap:8px;margin:12px 0 20px;flex-wrap:wrap">
       ${items.map((it) => {
-        const on = it.key === cur;
-        // 二级页面：父项保持可见（ghost 可点回），子项前面加 › 并作为当前项
-        const icon = it.child ? '<i class="fa-solid fa-angle-right" style="opacity:.55"></i>' : `<i class="fa-solid ${it.icon}"></i>`;
-        const title = it.child ? ` title="${escapeHtml(it.parentName + ' 的二级页面')}"` : '';
-        return `<a class="btn ${on ? '' : 'btn-ghost'}" href="${it.href}"${title}${on ? ' aria-current="page"' : ''}>${icon}${it.name}</a>`;
+        // v2.9.2：父分区（如「功能设置」）在它的子页面上仍保持高亮 —— 与专栏管理
+        // #/admin/articles/categories 上「专栏管理」大按钮仍为激活态一致；子页签再标出当前子页。
+        const on = it.key === cur || (!!subItem && it.key === active);
+        return `<a class="btn ${on ? '' : 'btn-ghost'}" href="${it.href}"${on ? ' aria-current="page"' : ''}><i class="fa-solid ${it.icon}"></i>${it.name}</a>`;
       }).join('')}
     </div>`;
+  // 二级子页签：只列子页（站长 v2.9.2：二级菜单里不再显示父项「功能设置」按钮）
+  // chip 样式与 adminSubTabs() 完全一致（见 style.css 的 .tag-chips.admin-subtabs）
+  let subChips = '';
+  if (parent && subpages.length) {
+    subChips = `<div class="tag-chips admin-subtabs settings-subtabs">
+      ${subpages.map((p) => {
+        const on = !!subItem && subItem.key === p.key;
+        return `<a class="chip${on ? ' active' : ''}" href="${p.href}"${on ? ' aria-current="page"' : ''}><i class="fa-solid ${p.icon}"></i>${p.name}</a>`;
+      }).join('')}
+    </div>`;
+  }
   return `<div class="settings-nav">
     ${adminHead({
       title: '系统设置',
       meta: version ? `<span class="badge" style="background:var(--accent-soft,#eaf4ff);color:var(--accent);font-size:11px;font-weight:700">v${escapeHtml(version)}</span> <span id="ver-latest" style="font-size:12px"></span>` : '<span id="ver-latest" style="font-size:12px"></span>',
       actions: `<a class="muted" style="font-size:12px" href="/docs/CHANGELOG.md" target="_blank" rel="noopener">版本日志</a>`,
       desc: '网站级配置（与「管理后台」分开）：点下面的分类逐块查看与修改，改完记得点各块底部的保存按钮。',
-      subtabs: chips,
+      subtabs: chips + subChips,
     })}
   </div>`;
 }
@@ -8073,13 +8088,54 @@ const pointsStatusHtml = (st) => {
       <div class="settle-chips">${chip('上次结算', last)}${chip('耗时', cost)}${chip('覆盖人数', covered)}${chip('下次预计', next)}</div>`;
 };
 
+/** 「功能开关」卡片内容（四个开关 + 保存按钮）。
+ *  v2.9.2：从 renderAdminSettings 的「功能设置」卡片里抽出来，供**父页面** #/settings/features
+ *  与**子页面** #/settings/features/switches 共用，保证两处 UI / 保存逻辑只有一份。
+ *  注意：这里不再放「积分计算 →」入口卡片 —— 积分设置已是同级子页签，重复入口只会造成冗余。 */
+function featureSwitchesInnerHtml(s) {
+  return `<h2 class="card-title">功能开关</h2>
+      <p class="muted card-lead">控制全站功能的启停：关闭后普通用户看不到对应入口，管理员仍可在后台管理。改动后点「保存功能设置」立即生效（无需重启）。</p>
+      <div class="form-group"><label class="switch"><input type="checkbox" id="s-discussion" ${s.discussion_enabled ? 'checked' : ''} /><span class="slider"></span><span class="switch-label">启用讨论区<span class="muted">关闭后普通用户不能发布讨论/回复，侧边栏入口隐藏</span></span></label></div>
+      <div class="form-group"><label class="switch"><input type="checkbox" id="s-article" ${s.article_enabled ? 'checked' : ''} /><span class="slider"></span><span class="switch-label">启用题解与专栏文章<span class="muted">关闭后普通用户不能发布文章</span></span></label></div>
+      <div class="form-group"><label class="switch"><input type="checkbox" id="s-points" ${s.points_enabled !== false ? 'checked' : ''} /><span class="slider"></span><span class="switch-label">启用积分系统<span class="muted">关闭后隐藏所有积分相关内容，用户名颜色改由等级分决定；管理员颜色不变</span></span></label></div>
+      <div class="form-group"><label class="switch"><input type="checkbox" id="s-pm" ${s.pm_enabled !== false ? 'checked' : ''} /><span class="slider"></span><span class="switch-label">启用私信<span class="muted">关闭后隐藏私信入口（侧边栏 / 手机端），直接访问私信页面或调用私信接口都会被拦截；已收发的私信数据保留</span></span></label></div>
+
+      <div class="row" style="margin-top:12px"><button class="btn" id="s-feature-save"><i class="fa-solid fa-floppy-disk"></i>保存功能设置</button></div>`;
+}
+
+/** 「功能开关」保存逻辑（父页面 / 子页面共用）：只提交四个功能开关，不动积分结算配置。 */
+function bindFeatureSwitchesSave() {
+  const featSave = document.getElementById('s-feature-save');
+  if (!featSave) return;
+  featSave.addEventListener('click', async () => {
+    try {
+      const pmOn = document.getElementById('s-pm').checked;
+      await api.put('/api/settings', {
+        discussion_enabled: document.getElementById('s-discussion').checked,
+        article_enabled: document.getElementById('s-article').checked,
+        points_enabled: document.getElementById('s-points').checked,
+        pm_enabled: pmOn,
+      });
+      toast('功能设置已保存', 'success');
+      Store.features.points_enabled = document.getElementById('s-points').checked;
+      // 私信开关立即生效：隐藏 / 恢复入口（顶栏动作区按功能开关签名重建）
+      Store.features.pm_enabled = pmOn;
+      lastTopbarSig = '';
+      renderTopbar();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
 async function renderAdminSettings(section) {
   // v2.9.0：系统设置（含各二级页）此前没有设置**浏览器标签页标题**（站长反馈）→ 统一为「系统设置」
   setPageTitle('系统设置');
+  // v2.9.2：父页面 #/settings/features 也要显示「功能设置 › 功能开关 / 积分设置」子页签，
+  // 第三参数显式传 ''（表示「父项为当前项」）；其它分区没有子页签，传 undefined。
+  const settingsSub = section === 'features' ? '' : undefined;
   app.innerHTML = '<div class="loading">加载中…</div>';
   let s = null;
   try { s = await api.get('/api/settings'); } catch (e) {
-    app.innerHTML = `${settingsTabs(section)}<div class="empty">加载设置失败：${escapeHtml(e.message)}</div>`;
+    app.innerHTML = `${settingsTabs(section, undefined, settingsSub)}<div class="empty">加载设置失败：${escapeHtml(e.message)}</div>`;
     return;
   }
 
@@ -8136,7 +8192,7 @@ async function renderAdminSettings(section) {
         ${options.map(([v, text]) => `<option value="${escapeHtml(v)}" ${String(val || '') === v ? 'selected' : ''}>${text}</option>`).join('')}
       </select></div>`;
 
-  app.innerHTML = `${settingsTabs(section, s.version || await siteVersion())}
+  app.innerHTML = `${settingsTabs(section, s.version || await siteVersion(), settingsSub)}
     <div class="settings-body">
 
     <div class="card" data-sec="update">
@@ -8325,22 +8381,9 @@ async function renderAdminSettings(section) {
     </div>
 
     <div class="card" data-sec="features">
-      <!-- v2.8.5：积分计算是「功能设置」的**二级页面**（#/settings/features/points），入口放在本卡片最上面，
-           一眼可见、一次点击直达，不需要先保存本页开关，也不会退化成「必须点两层才能改积分结算」。 -->
-      <div class="row" id="s-points-entry" style="gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 16px;padding:12px 14px;border:1px solid var(--border);border-radius:10px">
-        <i class="fa-solid fa-calculator" style="font-size:17px;color:var(--accent)"></i>
-        <div style="flex:1 1 260px;min-width:200px">
-          <div style="font-weight:700;font-size:13.5px">积分计算 <span class="muted" style="font-weight:400;font-size:12px">（功能设置的二级页面）</span></div>
-          <div class="muted" style="font-size:12px">全站积分的结算模式（实时 / 定时自动 / 手动结算）与结算间隔，改完立即生效。</div>
-        </div>
-        <a class="btn" id="s-points-open" href="#/settings/features/points"><i class="fa-solid fa-sliders"></i>积分计算 <i class="fa-solid fa-arrow-right"></i></a>
-      </div>
-      <div class="form-group"><label class="switch"><input type="checkbox" id="s-discussion" ${s.discussion_enabled ? 'checked' : ''} /><span class="slider"></span><span class="switch-label">启用讨论区<span class="muted">关闭后普通用户不能发布讨论/回复，侧边栏入口隐藏</span></span></label></div>
-      <div class="form-group"><label class="switch"><input type="checkbox" id="s-article" ${s.article_enabled ? 'checked' : ''} /><span class="slider"></span><span class="switch-label">启用题解与专栏文章<span class="muted">关闭后普通用户不能发布文章</span></span></label></div>
-      <div class="form-group"><label class="switch"><input type="checkbox" id="s-points" ${s.points_enabled !== false ? 'checked' : ''} /><span class="slider"></span><span class="switch-label">启用积分系统<span class="muted">关闭后隐藏所有积分相关内容，用户名颜色改由等级分决定；管理员颜色不变</span></span></label></div>
-      <div class="form-group"><label class="switch"><input type="checkbox" id="s-pm" ${s.pm_enabled !== false ? 'checked' : ''} /><span class="slider"></span><span class="switch-label">启用私信<span class="muted">关闭后隐藏私信入口（侧边栏 / 手机端），直接访问私信页面或调用私信接口都会被拦截；已收发的私信数据保留</span></span></label></div>
-
-      <div class="row" style="margin-top:12px"><button class="btn" id="s-feature-save"><i class="fa-solid fa-floppy-disk"></i>保存功能设置</button></div>
+      <!-- v2.9.2：四个开关抽到 featureSwitchesInnerHtml()，与子页面 #/settings/features/switches 共用；
+           积分设置已是同级子页签，这里不再重复放「积分计算 →」入口卡片。 -->
+      ${featureSwitchesInnerHtml(s)}
     </div>
 
     <div class="card" data-sec="judge">
@@ -8809,27 +8852,9 @@ async function renderAdminSettings(section) {
     }
   });
 
-  /* 说明：积分计算的输入 / 状态 / 按钮绑定全部随 UI 搬到二级页面 #/settings/features/points
-   * （见 renderAdminPointsSettle），本页只保留「积分计算 →」入口与四个功能开关的保存。 */
-
-  const featSave = document.getElementById('s-feature-save');
-  if (featSave) featSave.addEventListener('click', async () => {
-    try {
-      const pmOn = document.getElementById('s-pm').checked;
-      await api.put('/api/settings', {
-        discussion_enabled: document.getElementById('s-discussion').checked,
-        article_enabled: document.getElementById('s-article').checked,
-        points_enabled: document.getElementById('s-points').checked,
-        pm_enabled: pmOn,
-      });
-      toast('功能设置已保存', 'success');
-      Store.features.points_enabled = document.getElementById('s-points').checked;
-      // 私信开关立即生效：隐藏 / 恢复入口（顶栏动作区按功能开关签名重建）
-      Store.features.pm_enabled = pmOn;
-      lastTopbarSig = '';
-      renderTopbar();
-    } catch (e) { toast(e.message, 'error'); }
-  });
+  /* 说明：积分设置的输入 / 状态 / 按钮绑定全部在二级页面 #/settings/features/points
+   * （见 renderAdminPointsSettle）；本页只保留四个功能开关，保存逻辑与「功能开关」子页面共用。 */
+  bindFeatureSwitchesSave();
 
   // 站点页面与版权
   bindLivePreview('s-help', 'pv-help');
@@ -8879,62 +8904,103 @@ async function renderAdminSettings(section) {
   applySettingsSection(section);
 }
 
-/* 积分计算页面（仅最高管理员）——**属于「功能设置」的二级页面**：路由 #/settings/features/points，
- * 侧边栏高亮「系统设置」（renderTopbar 按 parts[1]==='settings' 判定），子标签里父项「功能设置」可见、本页为当前项。
- * v2.8.2：整块 UI 从「功能设置」页搬出来独立成页；v2.8.5：按站长要求改为「功能设置」的二级页面
- * （一级地址 #/settings/points 保留为重定向），页头仍走 settingsTabs('features', …, 'points')。
- * 现在直接放在本页的 .card 内，间距 / 字号 / 按钮尺寸沿用既有 .settle-* 类与站点变量，
- * 浅色与暗黑主题自动跟随，1440px 与 390px 都不横向溢出。 */
-async function renderAdminPointsSettle() {
+/* 功能开关页面（仅最高管理员）——「功能设置」的二级页面：路由 #/settings/features/switches。
+ * v2.9.2：按站长要求把原「功能设置」卡片里的四个开关拆成独立子页面，与「积分设置」并列；
+ * 页面骨架与其它设置页一致：settingsTabs('features', …, 'switches') 页头 + .settings-body + .card + h2.card-title。
+ * 开关 UI 与保存逻辑与父页面 #/settings/features 共用 featureSwitchesInnerHtml() / bindFeatureSwitchesSave()，
+ * 不再放「积分计算 →」入口卡片（同级子页签已可直接进入）。 */
+async function renderAdminFeatureSwitches() {
+  setPageTitle('功能开关');
   app.innerHTML = '<div class="loading">加载中…</div>';
-  setPageTitle('积分计算');
   if (!Store.user || Store.user.username !== 'admin') {
     app.innerHTML = '<div class="empty">仅最高管理员（admin）可访问此页面</div>';
     return;
   }
   const __ver = await siteVersion();
-  // 二级页面：父项 = features（功能设置），子项 = points（积分计算）
-  const ptsCrumb = `<div class="crumb" style="margin-top:6px"><a href="#/settings/features"><i class="fa-solid fa-arrow-left"></i> 功能设置</a> <span class="muted">/</span> <span class="muted">积分计算</span></div>`;
   let s = null;
   try { s = await api.get('/api/settings'); } catch (e) {
-    app.innerHTML = `${settingsTabs('features', __ver, 'points')}${ptsCrumb}<div class="empty">加载设置失败：${escapeHtml(e.message)}</div>`;
+    app.innerHTML = `${settingsTabs('features', __ver, 'switches')}<div class="empty">加载设置失败：${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  app.innerHTML = `${settingsTabs('features', s.version || __ver, 'switches')}
+    <div class="settings-body">
+    <div class="card" data-sec="features">
+      ${featureSwitchesInnerHtml(s)}
+    </div>
+    </div>`;
+  bindFeatureSwitchesSave();
+}
+
+/* 积分设置页面（仅最高管理员）——「功能设置」的二级页面：路由 #/settings/features/points，
+ * 侧边栏高亮「系统设置」（renderTopbar 按 parts[1]==='settings' 判定），子页签里父项「功能设置」可见、本页为当前项。
+ * v2.8.2：整块 UI 从「功能设置」页搬出来独立成页；v2.8.5：按站长要求改为「功能设置」的二级页面
+ * （一级地址 #/settings/points 保留为重定向），页头仍走 settingsTabs('features', …, 'points')。
+ * v2.9.2：按站长「和其它设置页不太一致」的反馈对齐视觉骨架 ——
+ *   · 内容包进 .settings-body、卡片带 data-sec（与 renderAdminSettings 的卡片同构）；
+ *   · 去掉本页独有的 .crumb 面包屑（层级由子页签行表达，父项「功能设置」可点回）；
+ *   · 结算方式 / 结算间隔改成标准 .form-group 行（标签在上、控件在下），
+ *     分段按钮与 .btn 同尺寸（38px 高、14px 字号、10px 圆角），详见 style.css 末尾的 v2.9.2 追加层；
+ *   · 页头版本徽章与其它设置页同源（优先用 /api/settings 的 version）。
+ * v2.9.2 续：页面标题 / 卡片标题统一为「积分设置」（子页签文字同此），与「功能开关」并列。
+ * 状态面板（.settle-status：模式说明 + 上次结算 / 耗时 / 覆盖人数 / 下次预计）是该页独有的信息区，保留。
+ * 功能、文案与交互未改：单选、间隔输入、保存 / 刷新 / 立即结算按钮与全部状态文案都与改动前一致。 */
+async function renderAdminPointsSettle() {
+  app.innerHTML = '<div class="loading">加载中…</div>';
+  setPageTitle('积分设置');
+  if (!Store.user || Store.user.username !== 'admin') {
+    app.innerHTML = '<div class="empty">仅最高管理员（admin）可访问此页面</div>';
+    return;
+  }
+  const __ver = await siteVersion();
+  // 二级页面：父项 = features（功能设置），子项 = points（积分设置）
+  // v2.9.2：去掉本页独有的 .crumb 面包屑 —— 其它设置页只用分块按钮表达层级，
+  // 父项「功能设置」本身就在子标签行里可点回，多一条面包屑会让页面顶部与其它设置页不一致。
+  let s = null;
+  try { s = await api.get('/api/settings'); } catch (e) {
+    app.innerHTML = `${settingsTabs('features', __ver, 'points')}<div class="empty">加载设置失败：${escapeHtml(e.message)}</div>`;
     return;
   }
   const psMode = PS_MODES.includes(s.points_settle_mode) ? s.points_settle_mode : 'realtime';
   const psInitMinutes = psClampMinutes(s.points_settle_interval_minutes);
   const psNat = psNatural(psInitMinutes);
 
-  app.innerHTML = `${settingsTabs('features', __ver, 'points')}
-    ${ptsCrumb}
-    <div class="card">
+  app.innerHTML = `${settingsTabs('features', s.version || __ver, 'points')}
+    <div class="settings-body">
+    <div class="card" data-sec="features">
+      <h2 class="card-title">积分设置</h2>
       <p class="muted card-lead">
         对<strong>全部用户</strong>重算四维积分并落库快照，供排行榜 / 个人中心读取与追溯历史。
         模式与间隔改完点「保存积分结算设置」；服务端每 60 秒现读一次设置，<strong>保存后立即生效</strong>（无需重启）。
       </p>
 
-      <div class="settle-seg" id="s-points-settle-seg" role="radiogroup" aria-label="积分结算模式">
-        <label class="settle-seg-item">
-          <input type="radio" name="s-points-settle-mode" value="realtime" ${psMode === 'realtime' ? 'checked' : ''} />
-          <span class="settle-seg-btn">实时<i class="settle-seg-tag">默认</i></span>
-        </label>
-        <label class="settle-seg-item">
-          <input type="radio" name="s-points-settle-mode" value="interval" ${psMode === 'interval' ? 'checked' : ''} />
-          <span class="settle-seg-btn">定时自动</span>
-        </label>
-        <label class="settle-seg-item">
-          <input type="radio" name="s-points-settle-mode" value="manual" ${psMode === 'manual' ? 'checked' : ''} />
-          <span class="settle-seg-btn">手动结算</span>
-        </label>
+      <div class="form-group" id="s-points-settle-mode-group">
+        <label>积分结算模式</label>
+        <div class="settle-seg" id="s-points-settle-seg" role="radiogroup" aria-label="积分结算模式">
+          <label class="settle-seg-item">
+            <input type="radio" name="s-points-settle-mode" value="realtime" ${psMode === 'realtime' ? 'checked' : ''} />
+            <span class="settle-seg-btn">实时<i class="settle-seg-tag">默认</i></span>
+          </label>
+          <label class="settle-seg-item">
+            <input type="radio" name="s-points-settle-mode" value="interval" ${psMode === 'interval' ? 'checked' : ''} />
+            <span class="settle-seg-btn">定时自动</span>
+          </label>
+          <label class="settle-seg-item">
+            <input type="radio" name="s-points-settle-mode" value="manual" ${psMode === 'manual' ? 'checked' : ''} />
+            <span class="settle-seg-btn">手动结算</span>
+          </label>
+        </div>
       </div>
 
-      <div class="settle-row" id="s-points-settle-interval-wrap">
-        <span class="settle-row-label">结算间隔</span>
-        <input class="input settle-num" id="s-points-settle-interval" type="number" inputmode="numeric" step="1" min="1" max="720" value="${psNat.value}" aria-label="结算间隔数值" />
-        <select class="input settle-unit" id="s-points-settle-interval-unit" aria-label="结算间隔单位">
-          <option value="hour" ${psNat.unit === 'hour' ? 'selected' : ''}>小时</option>
-          <option value="day" ${psNat.unit === 'day' ? 'selected' : ''}>天</option>
-        </select>
-        <span class="settle-hint" id="s-points-settle-hint">= 每 ${psText(psInitMinutes)}（${psInitMinutes} 分钟）</span>
+      <div class="form-group" id="s-points-settle-interval-wrap">
+        <label>结算间隔</label>
+        <div class="row">
+          <input class="input settle-num" id="s-points-settle-interval" type="number" inputmode="numeric" step="1" min="1" max="720" value="${psNat.value}" aria-label="结算间隔数值" />
+          <select class="input settle-unit" id="s-points-settle-interval-unit" aria-label="结算间隔单位">
+            <option value="hour" ${psNat.unit === 'hour' ? 'selected' : ''}>小时</option>
+            <option value="day" ${psNat.unit === 'day' ? 'selected' : ''}>天</option>
+          </select>
+          <span class="settle-hint" id="s-points-settle-hint">= 每 ${psText(psInitMinutes)}（${psInitMinutes} 分钟）</span>
+        </div>
       </div>
 
       <div class="settle-status" id="s-points-settle-status">${pointsStatusHtml(s)}</div>
@@ -8954,6 +9020,7 @@ async function renderAdminPointsSettle() {
         <strong>实时</strong>（默认）显示始终取实时计算值，快照只作历史；<strong>定时自动</strong>每隔设定的小时 / 天自动重算一次快照（排行榜与个人中心优先读快照）；<strong>手动结算</strong>只在点「立即结算全站积分」时写快照。<br />
         间隔范围 <strong>1 小时 ~ 30 天</strong>，留空使用默认 <strong>6 小时</strong>；服务端每 60 秒现读一次设置，保存后立即生效（无需重启）。
       </div>
+    </div>
     </div>`;
 
   /* 单位下拉（小时 / 天）→ 内部统一换算成分钟提交；
@@ -10681,7 +10748,7 @@ async function renderAdminContests() {
     ${adminHead({
       title: '比赛管理',
       actions: `<a class="btn" href="#/admin/contest/new"><i class="fa-solid fa-plus"></i>新建比赛</a>`,
-      desc: '等级分结算：比赛结束后，由管理员在后台点击「计算等级分」计算（Rated 比赛按当前名次写入等级分；非 Rated 比赛只刷新名次缓存）。全站积分结算在「系统设置 → 功能设置 → 积分计算」里。',
+      desc: '等级分结算：比赛结束后，由管理员在后台点击「计算等级分」计算（Rated 比赛按当前名次写入等级分；非 Rated 比赛只刷新名次缓存）。全站积分结算在「系统设置 → 功能设置 → 积分设置」里。',
       filter: `<div class="filter-bar">
         <input class="input" id="ac-search" placeholder="搜索比赛名称…" value="${escapeHtml(search)}" style="flex:0 0 200px" />
         <button class="btn" id="ac-search-btn"><i class="fa-solid fa-magnifying-glass"></i>搜索</button>

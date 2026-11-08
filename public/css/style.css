@@ -6104,3 +6104,91 @@ html body.dark .home-hero[class],
 html body.dark .card[class] {
   box-shadow: 0 10px 30px -20px rgba(0, 0, 0, .68) !important;
 }
+
+/* ============================================================================
+   v2.9.2 追加：「系统设置 → 功能设置 → 积分计算」与其它设置页视觉统一
+   ----------------------------------------------------------------------------
+   背景：站长反馈「积分计算设置界面和其它界面不太一致」。该页内容原本也放在 .card 里，
+   但骨架与其它设置页不同：页头下多一条 .crumb 面包屑（其它设置页只用分块按钮表达层级）、
+   控件自成一套 —— 药丸分段控件（999px 圆角、30px 高、13px 字）、行内左标签 + 100px 定宽输入框；
+   而其它设置页是 .form-group（标签在上、13px/700）+ .input / .btn 标准尺寸（38px 高、10px 圆角、14px 字）。
+
+   本层只作用于积分页的三个容器（#s-points-settle-mode-group / #s-points-settle-interval-wrap /
+   #s-points-settle-status），不改 .settle-* 的基干定义，也不影响其它页面：
+     1. 结算方式：并入 .form-group，选项按钮改成 .btn 口径（38px / 14px / 10px 圆角 / --border 边框），
+        选中态仍是主题色实心 + 白字，与设置页当前分块按钮一致；
+     2. 结算间隔：并入 .form-group，数值框 150px、单位框 110px（与其它设置页的定宽输入一致），
+        即时换算提示作为行内次要文字（12px --text-light）；
+     3. 状态面板是该页独有的信息区，保留；芯片沿用全站 .tag / .chip 的 999px 圆角语言，
+        只把字号对齐到 12px 体系。
+   颜色一律取站点变量，body.dark 自动跟随；760px 断点的窄屏行为与设置页分块按钮一致。
+   ============================================================================ */
+
+/* ---- 1) 结算方式：与设置页分块按钮（.btn / .btn-ghost）同尺寸，去掉药丸轨道 ---- */
+#s-points-settle-mode-group .settle-seg {
+  display: inline-flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 0; padding: 0; max-width: 100%;
+  background: transparent; border: 0; border-radius: 0;
+}
+#s-points-settle-mode-group .settle-seg-item {
+  /* .form-group label 会把选项标签变成块级标题（display:block / margin-bottom:6px），这里还原 */
+  display: inline-flex; margin: 0; padding: 0;
+  font-size: inherit; font-weight: inherit; color: inherit;
+}
+#s-points-settle-mode-group .settle-seg-btn {
+  min-height: 38px; padding: 9px 18px;
+  border: 1px solid var(--border); border-radius: 10px;
+  font-size: 14px; font-weight: 600;
+  color: var(--text); background: transparent; box-shadow: none;
+}
+#s-points-settle-mode-group .settle-seg-btn:hover { color: var(--accent); border-color: var(--accent); }
+#s-points-settle-mode-group .settle-seg-item > input[type="radio"]:checked + .settle-seg-btn {
+  border-color: transparent; color: #fff;
+  background-color: var(--accent);
+  background-image: linear-gradient(rgba(0, 0, 0, .18), rgba(0, 0, 0, .18));
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .28);
+}
+#s-points-settle-mode-group .settle-seg-item > input[type="radio"]:checked + .settle-seg-btn:hover { color: #fff; }
+
+/* ---- 2) 结算间隔：标准 .form-group 行 + 定宽输入（与其它设置页一致） ---- */
+#s-points-settle-interval-wrap .settle-num { flex: 0 0 150px; width: 150px; text-align: left; font-weight: 400; }
+#s-points-settle-interval-wrap .settle-unit { flex: 0 0 110px; width: 110px; }
+#s-points-settle-interval-wrap .settle-hint { flex: 1 1 240px; min-width: 0; font-size: 12px; line-height: 1.6; }
+/* JS 只在「实时 / 手动」下给该容器切 is-disabled；原规则挂在 .settle-row 上，这里补 form-group 口径 */
+#s-points-settle-interval-wrap.is-disabled { opacity: .5; }
+#s-points-settle-interval-wrap.is-disabled > label { color: var(--text-light); }
+
+/* ---- 3) 状态面板（该页独有，保留）：文字口径对齐站内 12px 次要说明 ---- */
+#s-points-settle-status .settle-mode-line { font-size: 12px; }
+#s-points-settle-status .settle-chip { font-size: 12px; }
+
+/* ---- 4) 窄屏（≤760px，与站内手机端断点一致）：模式按钮铺满一行，输入框可换行 ---- */
+@media (max-width: 760px) {
+  #s-points-settle-mode-group .settle-seg { display: flex; width: 100%; }
+  #s-points-settle-mode-group .settle-seg-item { flex: 1 1 auto; }
+  #s-points-settle-mode-group .settle-seg-btn { width: 100%; justify-content: center; padding: 8px 10px; font-size: 12.5px; }
+  #s-points-settle-interval-wrap .settle-num,
+  #s-points-settle-interval-wrap .settle-unit { flex: 1 1 92px; width: auto; min-width: 84px; }
+  #s-points-settle-interval-wrap .settle-hint { flex: 1 1 100%; }
+}
+
+/* ============================================================================
+   v2.9.2 追加：「功能设置」二级子页签（功能开关 / 积分设置）
+   ----------------------------------------------------------------------------
+   结构（app.js settingsTabs()）：
+     <div class="tag-chips admin-subtabs settings-subtabs">
+       <a class="chip active">功能设置</a>
+       <span class="settings-subtab-sep">›</span>
+       <a class="chip">功能开关</a><a class="chip">积分设置</a>
+     </div>
+   与专栏管理「文章审核 / 分类管理」完全同一套容器与类名
+   （.tag-chips.admin-subtabs + .chip），因此 28.8px 高、6px gap、999px 圆角、13px 字号、
+   3px 12px 内边距、激活态渐变都与参照页逐项一致；这里只补两个新类所需的最小样式：
+   分隔符垂直居中、容器在窄屏可正常换行且不产生横向滚动。
+   ============================================================================ */
+.settings-subtabs { min-width: 0; max-width: 100%; }
+.settings-subtab-sep {
+  align-self: center;
+  display: inline-flex; align-items: center;
+  color: var(--text-light); font-size: 13px; line-height: 1;
+}

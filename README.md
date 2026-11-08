@@ -4,7 +4,7 @@
 > 全部功能基于 Node.js 内置模块实现：**无需 `npm install`、无需编译、无需独立数据库服务**，拷贝即可运行。
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.9.1-blue.svg" alt="Version 2.9.1">
+  <img src="https://img.shields.io/badge/Version-2.9.2-blue.svg" alt="Version 2.9.2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%E2%89%A522.5-brightgreen" alt="Node.js ≥ 22.5"></a>
   <img src="https://img.shields.io/badge/Dependencies-Zero-orange" alt="零依赖">
@@ -354,9 +354,9 @@ data/                  运行时数据（自动生成）
 
 ## 版本日志
 
-当前版本 **v2.9.1**（`package.json`、系统设置页、启动日志三处一致）。完整版本线 **v0.1.0 → v0.7.0**（v1.0.0 之前的历代版本，编号按改动大小重新分配）**→ v1.0.0 → v2.9.1**。
+当前版本 **v2.9.2**（`package.json`、系统设置页、启动日志三处一致）。完整版本线 **v0.1.0 → v0.7.0**（v1.0.0 之前的历代版本，编号按改动大小重新分配）**→ v1.0.0 → v2.9.2**。
 
-- **v2.9.1** 积分排行榜新增「积分达成时间」列（显示该用户最近一次得分时间）；用户名黄名改为 #ead80e。
+- **v2.9.2** 积分排行榜新增「积分达成时间」列（显示该用户最近一次得分时间）；用户名黄名改为 #ead80e。
 - **v2.9.0** 首页加载更流畅；提交「用时」统一按各测试点用时之和显示；「社区管理」恢复为公开页（未登录也能查看）；修复自动积分结算拖慢访问、暗黑模式副标题重影等问题；站点 Logo 与外观细节调整。
 - **v2.8.8** 站点图标再次放大（侧栏默认 56px、首页 112/96/80px）；favicon 去掉多余空白后图形更大；网站黄色恢复为更亮的 #fae607。
 - **v2.8.7** 站点图标放大（侧栏默认 40px、首页 84/64px，滑块 18~72 可调）；首页卡片去掉描边；「社区管理」改为「用户权限变更记录」，只公示权限变更（含棕名），其它分类不再出现。

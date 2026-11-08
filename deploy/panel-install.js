@@ -444,7 +444,8 @@ NODE_ENV=production
   out('');
   out('  打开网站');
   const lan = internalIp();
-  const pub = await publicIp();
+  const pubInfo = await publicIp();          // 返回 { ip, from }，不是字符串
+  const pub = (pubInfo && pubInfo.ip) || '';
   if (pub) out(`     公网地址：http://${pub}${PORT === 80 ? '' : ':' + PORT}/　← 外网访问用这个（未配置域名时）`);
   else out(`     公网地址：未能自动识别，请用服务器公网 IP 访问（也可先设置环境变量 LCZOJ_PUBLIC_IP）`);
   if (lan) out(`     内网地址：http://${lan}${PORT === 80 ? '' : ':' + PORT}/　← 同一局域网内访问`);
