@@ -200,7 +200,7 @@ git pull
 docker compose up -d --build
 ```
 
-镜像标签为 `lczoj:<版本号>`（例如 `lczoj:2.9.3`），旧标签会保留在本机，可用于回滚：
+镜像标签为 `lczoj:<版本号>`（例如 `lczoj:2.9.5`），旧标签会保留在本机，可用于回滚：
 
 ```bash
 # 查看本机已有镜像
@@ -373,3 +373,93 @@ rm -f data/oj.db-wal data/oj.db-shm                          # 必须删，残�
 ```
 
 前置：`sudo mkdir -p /root/lczoj-backup`，并把该行加入 `sudo crontab -e`（crontab 里的 `%` 要写成 `\%`）。完整备份与恢复说明（含迁移、面板定时任务）见 [PANEL.md](PANEL.md) 第 7 节。
+
+---
+
+## 13. 报错：更新被文件系统拒绝（EROFS / Read-only file system）
+
+### 13.1 现象
+
+后台点「一键更新」时提示：
+
+> 更新需要的写入操作被文件系统拒绝（EROFS：Read-only file system，不可写位置：`./src/public/deploy/docs` 等）。
+> 这通常是 systemd 加固造成的：单元里配了 `ProtectSystem=strict`（或 `ReadOnlyPaths`），而项目目录不在 `ReadWritePaths` 中。
+
+**这是预期行为，不是权限属主问题** —— 改 `chown` / `chmod` 都没用。
+
+### 13.2 原因
+
+一键脚本（`install.sh` / `install-ubuntu.sh` / `install-centos.sh` / `bootstrap.sh`）安装的 systemd 单元里有：
+
+```ini
+ProtectSystem=strict
+ReadWritePaths=/opt/lczoj/data /opt/lczoj/logs /tmp
+```
+
+`ProtectSystem=strict` 会把**整个文件系统**挂成只读，只有 `ReadWritePaths` 列出的目录可写。
+
+> **v2.9.5 起，一键脚本默认把项目目录也加入 `ReadWritePaths`** —— 新部署开箱即可用后台「一键更新」✓。
+> 下面这些处理步骤只适用于**在此之前安装、或被手工加固过**的部署（即 `ReadWritePaths` 里没有项目目录）。
+
+旧版本默认只放开 `data/`、`logs/`、`/tmp`，**项目代码目录是只读的**，所以网页端无法覆盖 `server.js`、`src/`、`public/` 等文件。
+
+### 13.3 解决办法（三选一）
+
+**先拿到项目目录**（一键脚本默认 `/opt/lczoj`）：
+
+```bash
+PROJ=$(systemctl show lczoj -p WorkingDirectory --value)
+echo "$PROJ"
+```
+
+#### 方案 A（推荐，安全）：保持加固，改用命令行更新
+
+```bash
+cd /opt/lczoj
+sudo node deploy/update.js
+```
+
+命令在 systemd 沙箱**之外**运行，不受 `ProtectSystem` 限制，能正常覆盖代码；更新完会自动重启服务并做健康检查。服务账户自身仍然没有改代码的权限，安全性最高。代价是后台「一键更新」按钮不可用。
+
+#### 方案 B：放开项目目录，让网页一键更新可用
+
+```bash
+PROJ=$(systemctl show lczoj -p WorkingDirectory --value)
+sudo cp /etc/systemd/system/lczoj.service /etc/systemd/system/lczoj.service.bak
+sudo sed -i "s#^ReadWritePaths=.*#ReadWritePaths=$PROJ $PROJ/data $PROJ/logs /tmp#" /etc/systemd/system/lczoj.service
+sudo chown -R lczoj:lczoj "$PROJ"
+sudo systemctl daemon-reload && sudo systemctl restart lczoj
+
+# 验证
+systemctl show lczoj -p ReadWritePaths
+curl -fsS http://127.0.0.1:3000/api/health || curl -fsS http://127.0.0.1/api/health
+```
+
+> ⚠️ 安全代价：服务账户从此可以改写站点代码。若 OJ 被攻破，攻击者可借此留下后门。仅在确实需要网页端更新时使用。
+
+#### 方案 C（折中）：只放开更新涉及的路径
+
+```bash
+PROJ=$(systemctl show lczoj -p WorkingDirectory --value)
+sudo cp /etc/systemd/system/lczoj.service /etc/systemd/system/lczoj.service.bak
+sudo sed -i "s#^ReadWritePaths=.*#ReadWritePaths=$PROJ/data $PROJ/logs /tmp $PROJ/src $PROJ/public $PROJ/deploy $PROJ/docs $PROJ/server.js $PROJ/package.json#" /etc/systemd/system/lczoj.service
+sudo systemctl daemon-reload && sudo systemctl restart lczoj
+```
+
+> 即使被攻破，`data/` 之外的其它文件仍只读；但 `server.js` 与 `src/` 可写已经足够危险，安全性仍低于方案 A。
+
+### 13.4 验证是否修好
+
+```bash
+# 单元里能看到项目目录
+systemctl show lczoj -p ReadWritePaths
+# 服务正常
+systemctl status lczoj --no-pager | head -5
+curl -fsS http://127.0.0.1:3000/api/health || curl -fsS http://127.0.0.1/api/health
+```
+
+然后回后台再点一次「一键更新」即可。
+
+### 13.5 想保留加固又要网页更新？
+
+不建议。更细的权限设计（只放开 `src/`、`public/` 等）本质上仍然让"可写代码"成立，收益有限。**日常更新用方案 A 最省心**：一条 `sudo node deploy/update.js`。

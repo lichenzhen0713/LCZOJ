@@ -6192,3 +6192,36 @@ html body.dark .card[class] {
   display: inline-flex; align-items: center;
   color: var(--text-light); font-size: 13px; line-height: 1;
 }
+
+/* ============================================================================
+   v2.9.4 追加：比赛排行榜「题目列头」两行 + 排序（站长要求，参照洛谷比赛榜单）
+   ----------------------------------------------------------------------------
+   结构（app.js renderStandingsBox）：
+     <th class="num st-problem-th" data-letter="A" aria-sort="descending">
+       <button class="st-sort-btn">A <span class="st-sort-arrow">↓</span></button>
+       <div class="st-stat">1.94k / 2.39k</div>
+     </th>
+   第一行 = 题号 + 排序箭头（可点击，三态），第二行 = 该题全场「通过数 / 提交数」灰色小字。
+   数字已在前端缩写（<1000 原样 → x.xxk → x.xxm），这里只保证 nowrap、不换行、窄屏缩到 11px。
+   颜色全部沿用既有主题变量（--text-light / --accent），亮色与夜间模式均自动适配。
+   ============================================================================ */
+th.st-problem-th { vertical-align: middle; padding-top: 7px; padding-bottom: 7px; }
+.st-sort-btn {
+  display: inline-flex; align-items: center; gap: 3px;
+  margin: 0; padding: 0; border: 0; background: none;
+  color: inherit; font: inherit; font-weight: 700; line-height: 1.15;
+  white-space: nowrap; cursor: pointer;
+}
+.st-sort-btn:hover { color: var(--accent); }
+.st-sort-arrow { color: var(--text-light); font-size: 10px; line-height: 1; font-weight: 400; }
+.st-problem-th.active .st-sort-btn,
+.st-problem-th.active .st-sort-arrow { color: var(--accent); }
+.st-stat {
+  margin-top: 2px;
+  color: var(--text-light); font-size: 12px; font-weight: 400; line-height: 1.2;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.st-problem-th.active .st-stat { color: var(--accent); opacity: .9; }
+@media (max-width: 760px) {
+  .st-stat { font-size: 11px; }
+}

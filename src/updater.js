@@ -702,7 +702,7 @@ function writeBlockHint({ codes = [], dirs = [], docker = false, root = ROOT, de
       code: 'EROFS',
       title: '当前部署把项目目录挂成了只读（EROFS），后台无法覆盖代码',
       message: '更新需要的写入操作被文件系统拒绝（EROFS：Read-only file system，不可写位置：' + (shown || '项目目录') + '）。'
-        + '这通常是 systemd 加固造成的：单元里配了 ProtectSystem=strict（或 ReadOnlyPaths），而项目目录不在 ReadWritePaths 中——'
+        + '这通常是 systemd 加固造成的：单元里配了 ProtectSystem=strict（或 ReadOnlyPaths），而项目目录不在 ReadWritePaths 中（一键脚本默认已放开项目目录，出现此提示说明你的单元被手工加固过）——'
         + 'LCZOJ 自带的 deploy/lczoj.service 正是这种加固配置，属于预期行为，不是权限属主问题（chown 无效）。'
         + '本次更新已中止，未修改任何文件。',
       commands: [
@@ -803,15 +803,47 @@ function preflightWriteCheck() {
 async function applySourceUpdate() {
   const isGit = fs.existsSync(path.join(ROOT, '.git'));
   if (isGit && hasCmd('git')) {
-    setPhase('applying', '检测到 git 仓库，执行 git pull');
-    logLine('说明：git pull 路径不做源码包哈希校验（信任远端仓库与 HTTPS 传输）；如需可校验的更新，请用源码包 + OJ_UPDATE_SHA256。');
-    const r = run('git', ['pull', '--ff-only']);
-    if (r.code === 0) {
-      logLine('git pull 完成');
-      state.integrity = { verified: false, unverified: true, how: 'git', reason: 'git pull 未做哈希校验' };
-      return { how: 'git', written: [] };
+    setPhase('applying', '检测到 git 仓库，执行「完全覆盖」更新（fetch + reset --hard + clean）');
+    logLine('更新方式：git 完全覆盖 —— 以远端仓库为准，本地被改过的文件会被还原、远端已删除的文件会一并删掉；');
+    logLine('　　　　　data/、logs/、node_modules/、.env、deploy/panel.* 属 gitignore，不在覆盖范围（数据与本地配置不受影响）。');
+    logLine('说明：git 路径不做源码包哈希校验（信任远端仓库与 HTTPS 传输）；如需可校验的更新，请用源码包 + OJ_UPDATE_SHA256。');
+
+    // 1) 拉取远端（--prune 顺便清掉远端已删除的分支引用）
+    const f = run('git', ['fetch', '--all', '--prune']);
+    if (f.code !== 0) {
+      logLine('git fetch 未成功：' + (f.out || '').split('\n')[0]);
+      logLine('改用源码包覆盖方式继续');
+    } else {
+      // 2) 找到上游分支（@{u} 不存在时回退 origin/HEAD、origin/master、origin/main）
+      let upstream = '';
+      const u = run('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
+      if (u.code === 0 && (u.out || '').trim()) upstream = (u.out || '').trim();
+      if (!upstream) {
+        for (const cand of ['origin/HEAD', 'origin/master', 'origin/main']) {
+          if (run('git', ['rev-parse', '--verify', '--quiet', cand + '^{commit}']).code === 0) { upstream = cand; break; }
+        }
+      }
+      if (!upstream) {
+        logLine('找不到远端上游分支，改用源码包覆盖方式继续');
+      } else {
+        // 3) 强制对齐远端（这就是「完全覆盖」的核心：本地改动一律丢弃）
+        const rs = run('git', ['reset', '--hard', upstream]);
+        if (rs.code !== 0) {
+          logLine('git reset --hard 未成功：' + (rs.out || '').split('\n')[0]);
+        } else {
+          logLine('已对齐 ' + upstream + '（本地改动已丢弃）');
+          // 4) 删除远端已不存在的**未跟踪**文件；gitignore 的 data/、logs/、.env 等不受影响
+          const cl = run('git', ['clean', '-fd']);
+          if (cl.code === 0) {
+            const removed = (cl.out || '').split('\n').map((s) => s.replace(/^Removing\s+/, '').trim()).filter(Boolean);
+            logLine('已清理 ' + removed.length + ' 个远端不存在的残留文件' + (removed.length ? '（示例：' + removed.slice(0, 5).join('、') + (removed.length > 5 ? ' …' : '') + '）' : ''));
+          }
+          logLine('git 完全覆盖完成');
+          state.integrity = { verified: false, unverified: true, how: 'git', reason: 'git reset --hard 未做哈希校验' };
+          return { how: 'git', written: [] };
+        }
+      }
     }
-    logLine('git pull 未成功（可能存在本地改动），改用源码包覆盖：' + (r.out || '').split('\n')[0]);
   } else {
     logLine('未检测到 git 仓库，使用源码包覆盖方式');
   }

@@ -500,11 +500,47 @@ function persistStandingsRanks(contestId, rows) {
   return n;
 }
 
+/**
+ * 每道题的全场「通过数 / 提交数」（v2.9.4）。
+ * - submit_count：本场比赛内该题的全部提交数（contest_id 过滤）
+ * - ac_count：其中的通过数；ACM 按 verdict='Accepted'，OI / IOI 按项目现有「通过」口径 score >= 100
+ *   （与 computeStandings 里「首杀」的 isFirst 判断一致）
+ * 单次 GROUP BY 聚合，避免逐题 N+1；顺序由调用方按 contest_problems.sort_order 映射。
+ */
+function computeProblemStats(contestId) {
+  const rows = db.prepare(`
+    SELECT s.problem_id,
+           COUNT(*) AS submit_count,
+           SUM(CASE WHEN s.verdict = 'Accepted' THEN 1 ELSE 0 END) AS ac_count_acm,
+           SUM(CASE WHEN s.score >= 100 THEN 1 ELSE 0 END) AS ac_count_full
+    FROM submissions s
+    WHERE s.contest_id = ?
+    GROUP BY s.problem_id
+  `).all(contestId);
+  const byProblem = {};
+  for (const r of rows) byProblem[r.problem_id] = r;
+  return byProblem;
+}
+
 function getStandings(id, viewer) {
   const r = computeStandings(id, viewer);
   if (!r) return null;
   // 展示时顺带刷新名次缓存（仅未被锁定的榜单）——缓存只是加速，随时可由实时计算重建
-  if (!r.hidden && r.allRows) persistStandingsRanks(id, r.allRows);
+  if (!r.hidden && r.allRows) {
+    persistStandingsRanks(id, r.allRows);
+    // 每题的「全场通过数 / 提交数」：仅排行榜展示需要，按比赛题目顺序输出（A/B/C…）。
+    const byProblem = computeProblemStats(id);
+    r.standings.problem_stats = (r.standings.problems || []).map((p) => {
+      const st = byProblem[p.problem_id];
+      const ac = st ? Number(r.standings.type === 'ACM' ? st.ac_count_acm : st.ac_count_full) : 0;
+      return {
+        pid: p.problem_id,
+        letter: p.letter,
+        ac_count: ac || 0,
+        submit_count: (st && Number(st.submit_count)) || 0,
+      };
+    });
+  }
   return r.standings;
 }
 

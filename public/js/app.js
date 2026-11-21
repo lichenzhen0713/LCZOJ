@@ -7237,7 +7237,13 @@ async function renderContestDetail(id, query) {
   const canContest = hasP('contest');
   const isSuper = hasP('contest'); // 排行榜「操作」列（棕名）仅具备比赛管理权限可见
   const STANDINGS_PAGE_SIZE = 30; // 排行榜每页 30 名
-  // 排行榜渲染（按页）：standings.rows 已按后端排序；自己的行置顶高亮一份，同时保留在列表原位
+  // v2.9.4：题目列头「通过数 / 提交数」缩写（<1000 原样；≥1000 → x.xxk；≥1000000 → x.xxm）。
+  // 复用首页统计的 fmtCompact()（同样保留两位小数、处理浮点进位），仅把大写 M 换成站长要求的小写 m。
+  const fmtStandingCount = (n) => fmtCompact(n).replace(/M$/, 'm');
+  // 题目列排序状态：letter=null 表示默认（后端名次）；dir=1 降序、-1 升序；第三次点击取消排序
+  let standingSort = { letter: null, dir: 0 };
+  let standingsPage = 1;
+  // 排行榜渲染（按页）：默认按后端名次；点题目列箭头时仅在前端重排（数据已全量在页面上）
   const renderStandingsBox = (page) => {
     if (!standings || standings.hidden) {
       return '<div class="empty">暂无数据</div>';
@@ -7245,11 +7251,37 @@ async function renderContestDetail(id, query) {
     const rows = standings.rows || [];
     if (rows.length === 0) return '<div class="empty">暂无数据</div>';
     const letters = standings.problems.map((p) => p.letter);
-    const headCells = letters.map((l) => `<th class="num">${l}</th>`).join('');
+    const statByLetter = {};
+    for (const ps of (standings.problem_stats || [])) statByLetter[ps.letter] = ps;
+    const headCells = letters.map((l) => {
+      const ps = statByLetter[l];
+      const active = standingSort.letter === l && standingSort.dir !== 0;
+      const arrow = active ? (standingSort.dir === 1 ? '↓' : '↑') : '⇅';
+      const statHtml = ps
+        ? `<div class="st-stat" title="通过 ${ps.ac_count} / 提交 ${ps.submit_count}">${fmtStandingCount(ps.ac_count)} / ${fmtStandingCount(ps.submit_count)}</div>`
+        : '';
+      return `<th class="num st-problem-th${active ? ' active' : ''}" data-letter="${escapeHtml(l)}" aria-sort="${active ? (standingSort.dir === 1 ? 'descending' : 'ascending') : 'none'}" title="点击按本题得分排序（降序 → 升序 → 默认名次）"><button type="button" class="st-sort-btn" aria-label="按 ${escapeHtml(l)} 题得分排序"><span>${escapeHtml(l)}</span><span class="st-sort-arrow" aria-hidden="true">${arrow}</span></button>${statHtml}</th>`;
+    }).join('');
+    // 排序只影响展示顺序：得分降序 / 升序；同分时按该题用时（次关键字）升序，再按总用时、user_id 保证稳定
+    let others = rows;
+    if (standingSort.letter && standingSort.dir !== 0) {
+      const letter = standingSort.letter;
+      const dir = standingSort.dir;
+      others = rows.slice().sort((a, b) => {
+        const pa = a.problem_results[letter] || {};
+        const pb = b.problem_results[letter] || {};
+        const sa = Number(pa.score) || 0;
+        const sb = Number(pb.score) || 0;
+        if (sa !== sb) return dir === 1 ? sb - sa : sa - sb;
+        const ta = (Number(pa.time_ms) > 0 ? Number(pa.time_ms) : Number(a.total_time_ms) || 0);
+        const tb = (Number(pb.time_ms) > 0 ? Number(pb.time_ms) : Number(b.total_time_ms) || 0);
+        if (ta !== tb) return ta - tb;
+        return (a.user_id || 0) - (b.user_id || 0);
+      });
+    }
     const myRow = (Store.user && Store.user.id)
       ? rows.find((r) => r.user_id === Store.user.id) || null
       : null;
-    const others = rows; // 自己在完整排行榜中原位保留（分页计入），仅额外置顶一份
     const totalPages = Math.max(1, Math.ceil(others.length / STANDINGS_PAGE_SIZE));
     const pg = Math.min(Math.max(1, page), totalPages);
     const pageRows = others.slice((pg - 1) * STANDINGS_PAGE_SIZE, pg * STANDINGS_PAGE_SIZE);
@@ -7527,34 +7559,47 @@ async function renderContestDetail(id, query) {
     if (e.target.tagName === 'A') return;
     nav(`problem/${tr.dataset.pid}?contest=${c.id}`);
   }));
-  // 排行榜分页：30 名一页，翻页时仅重渲染排行榜区块
-  const standingsBox = document.getElementById('standings-box');
-  if (standingsBox && standings && !standings.hidden && standings.rows && standings.rows.length > STANDINGS_PAGE_SIZE) {
-    let standingsPage = 1;
-    const bindStandingsPager = () => {
-      bindPagination((p) => {
-        standingsPage = p;
-        standingsBox.innerHTML = renderStandingsBox(p);
-        bindStandingsPager();
-        // 重新绑定棕名处罚按钮
-        standingsBox.querySelectorAll('.st-brown').forEach((b) => b.addEventListener('click', async () => {
-          const type = b.dataset.type;
-          const uid = b.dataset.user;
-          const uname = b.dataset.uname;
-          if (type === 'plagiarism') {
-            if (!confirm(`确定对 ${uname} 执行棕名处罚（抄题解）？将清空其练习积分并将所有题目置为未通过，棕名 14 天。`)) return;
-          } else {
-            if (!confirm(`确定对 ${uname} 执行棕名处罚（比赛作弊）？本场比赛（#${c.id}）判 -1 分，棕名 14 天。`)) return;
-          }
-          try {
-            await api.post(`/api/admin/users/${uid}/brown`, { type, contest_id: type === 'cheat' ? c.id : undefined });
-            toast('已执行棕名处罚', 'success');
-            renderContestDetail(id, new URLSearchParams({ tab: getCurTab() }));
-          } catch (e) { toast(e.message, 'error'); }
-        }));
+  // 排行榜交互：题目列头排序（三态：得分降序 → 升序 → 恢复默认名次）+ 分页 + 棕名处罚按钮。
+  // 只重渲染 #standings-box 内部；每次重渲染后重新绑定（列头、分页、棕名按钮）。
+  const brownHandler = async (b) => {
+    const type = b.dataset.type;
+    const uid = b.dataset.user;
+    const uname = b.dataset.uname;
+    if (type === 'plagiarism') {
+      if (!confirm(`确定对 ${uname} 执行棕名处罚（抄题解）？将清空其练习积分并将所有题目置为未通过，棕名 14 天。`)) return;
+    } else {
+      if (!confirm(`确定对 ${uname} 执行棕名处罚（比赛作弊）？本场比赛（#${c.id}）判 -1 分，棕名 14 天。`)) return;
+    }
+    try {
+      await api.post(`/api/admin/users/${uid}/brown`, { type, contest_id: type === 'cheat' ? c.id : undefined });
+      toast('已执行棕名处罚', 'success');
+      renderContestDetail(id, new URLSearchParams({ tab: getCurTab() }));
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  const bindStandingsBox = () => {
+    const box = document.getElementById('standings-box');
+    if (!box) return;
+    box.querySelectorAll('.st-problem-th').forEach((th) => {
+      th.addEventListener('click', () => {
+        const letter = th.dataset.letter;
+        if (standingSort.letter !== letter) standingSort = { letter, dir: 1 };        // 第一次：降序
+        else if (standingSort.dir === 1) standingSort = { letter, dir: -1 };          // 第二次：升序
+        else standingSort = { letter: null, dir: 0 };                                 // 第三次：默认名次
+        standingsPage = 1;
+        box.innerHTML = renderStandingsBox(standingsPage);
+        bindStandingsBox();
       });
-    };
-    bindStandingsPager();
+    });
+    bindPagination((p) => {
+      standingsPage = p;
+      box.innerHTML = renderStandingsBox(p);
+      bindStandingsBox();
+    });
+    box.querySelectorAll('.st-brown').forEach((b) => b.addEventListener('click', () => brownHandler(b)));
+  };
+  const standingsBox = document.getElementById('standings-box');
+  if (standingsBox && standings && !standings.hidden && standings.rows && standings.rows.length > 0) {
+    bindStandingsBox();
   }
   const signupBtn = document.getElementById('signup-btn');
   if (signupBtn) {
@@ -7582,23 +7627,6 @@ async function renderContestDetail(id, query) {
       renderContestDetail(id, new URLSearchParams({ tab: getCurTab() }));
     } catch (e) { toast(e.message, 'error'); }
   });
-
-  // 超管：直接在排行榜上对用户执行棕名处罚
-  document.querySelectorAll('.st-brown').forEach((b) => b.addEventListener('click', async () => {
-    const type = b.dataset.type;
-    const uid = b.dataset.user;
-    const uname = b.dataset.uname;
-    if (type === 'plagiarism') {
-      if (!confirm(`确定对 ${uname} 执行棕名处罚（抄题解）？将清空其练习积分并将所有题目置为未通过，棕名 14 天。`)) return;
-    } else {
-      if (!confirm(`确定对 ${uname} 执行棕名处罚（比赛作弊）？本场比赛（#${c.id}）判 -1 分，棕名 14 天。`)) return;
-    }
-    try {
-      await api.post(`/api/admin/users/${uid}/brown`, { type, contest_id: type === 'cheat' ? c.id : undefined });
-      toast('已执行棕名处罚', 'success');
-      renderContestDetail(id, new URLSearchParams({ tab: getCurTab() }));
-    } catch (e) { toast(e.message, 'error'); }
-  }));
 
   // 比赛管理权限：删除比赛（连带赛题关联、报名记录与赛时提交）
   const contestDelBtn = document.getElementById('contest-del-btn');

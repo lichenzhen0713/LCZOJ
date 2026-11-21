@@ -193,9 +193,9 @@ node deploy/docker-onekey.js      # 一键：没装 Docker 会自动装（Linux�
 ```bash
 docker compose up -d --build          # 用仓库自带的 compose（默认映射到 80 端口）
 # 或不用 compose：
-docker build -t lczoj:2.9.3 .
+docker build -t lczoj:2.9.5 .
 docker run -d --name lczoj --restart unless-stopped -p 80:80 \
-  -v lczoj-data:/app/data -e OJ_MAX_JUDGES=4 -e TZ=Asia/Shanghai lczoj:2.9.3
+  -v lczoj-data:/app/data -e OJ_MAX_JUDGES=4 -e TZ=Asia/Shanghai lczoj:2.9.5
 ```
 
 完整说明（备份恢复、换端口、资源限制、HTTPS、镜像内容、安全提示、排错）见 [DOCKER.md](DOCKER.md)。

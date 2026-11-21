@@ -250,9 +250,10 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=$PROTECT_HOME
 ProtectSystem=strict
-# 注意：项目代码目录在 ProtectSystem=strict 下是**只读**的。后台「一键更新」要覆盖项目文件，
-# 在这个单元里会失败（EROFS）；请改用：sudo node deploy/update.js，或重跑本安装脚本。
-ReadWritePaths=$PROJECT_DIR/data $PROJECT_DIR/logs /tmp
+# 项目目录本身也放开为可写 → 后台「一键更新」可以直接覆盖代码（开箱可用）。
+# 若想更严格（服务账户不得改写站点代码），把下面的 $PROJECT_DIR 从 ReadWritePaths 里删掉，
+# 之后更新请改用：sudo node deploy/update.js（详见 docs/UPDATE.md 第 13 节）。
+ReadWritePaths=$PROJECT_DIR $PROJECT_DIR/data $PROJECT_DIR/logs /tmp
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

@@ -21,7 +21,7 @@ services:
       # 想构建「精简镜像」（只有 Python / JavaScript / PHP 三种语言）就取消下面两行注释
       # args:
       #   WITH_TOOLCHAINS: "0"
-    image: lczoj:2.9.3
+    image: lczoj:2.9.5
     container_name: lczoj
     restart: unless-stopped
 

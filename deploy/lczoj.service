@@ -85,10 +85,10 @@ PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
 # 只允许写这些目录（按实际路径调整）：数据目录、日志目录、临时目录
-# 注意：项目代码目录在此设置下是**只读**的。后台「一键更新」要覆盖项目文件，在这个单元里会失败（EROFS）；
-# 更新请改用：sudo node deploy/update.js（或重跑安装脚本）。若确实要让网页端自助更新，
-# 需把项目目录也加进来（ReadWritePaths=... /www/wwwroot/lczoj），代价是服务账户可改写站点代码。
-ReadWritePaths=/www/wwwroot/lczoj/data /www/wwwroot/lczoj/logs /tmp
+# 默认把项目目录也放开为可写 → 后台「一键更新」可以直接覆盖代码（开箱可用）。
+# 代价：服务账户可以改写站点代码。若想更严格，把 /www/wwwroot/lczoj 从下面删掉，
+# 之后更新请改用：sudo node deploy/update.js（详见 docs/UPDATE.md 第 13 节）。
+ReadWritePaths=/www/wwwroot/lczoj /www/wwwroot/lczoj/data /www/wwwroot/lczoj/logs /tmp
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
