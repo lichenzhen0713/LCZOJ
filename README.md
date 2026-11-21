@@ -4,7 +4,7 @@
 > 全部功能基于 Node.js 内置模块实现：**无需 `npm install`、无需编译、无需独立数据库服务**，拷贝即可运行。
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.9.5-blue.svg" alt="Version 2.9.5">
+  <img src="https://img.shields.io/badge/Version-2.9.6-blue.svg" alt="Version 2.9.6">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
   <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%E2%89%A522.5-brightgreen" alt="Node.js ≥ 22.5"></a>
   <img src="https://img.shields.io/badge/Dependencies-Zero-orange" alt="零依赖">
@@ -354,8 +354,9 @@ data/                  运行时数据（自动生成）
 
 ## 版本日志
 
-当前版本 **v2.9.5**（`package.json`、系统设置页、启动日志三处一致）。完整版本线 **v0.1.0 → v0.7.0**（v1.0.0 之前的历代版本，编号按改动大小重新分配）**→ v1.0.0 → v2.9.5**。
+当前版本 **v2.9.6**（`package.json`、系统设置页、启动日志三处一致）。完整版本线 **v0.1.0 → v0.7.0**（v1.0.0 之前的历代版本，编号按改动大小重新分配）**→ v1.0.0 → v2.9.6**。
 
+- **v2.9.6** 后台用户管理点用户名可弹出用户详情，含基本信息与违规 / 管理记录。
 - **v2.9.5** 比赛排行榜的每个题目列头显示该题通过数 / 提交数，并支持按题目排序。
 - **v2.9.3** 题库记住上次浏览的页码；后台可为每个测试点单独设置分数。
 - **v2.9.2** 积分排行榜新增「积分达成时间」列（显示该用户最近一次得分时间）；用户名黄名改为 #ead80e。
@@ -365,8 +366,7 @@ data/                  运行时数据（自动生成）
 - **v2.8.6** 修复默认网站图标"改了也不生效"（默认地址带版本号强制刷新 + 新增 /favicon.ico 兜底）；站点 Logo 换为新的矢量图标（侧栏/首页/标签页统一）。
 - **v2.8.5** 「积分计算」改为「功能设置」的二级页面（旧地址自动跳转）；修复默认网站图标（改为纯矢量天平，零字体依赖、不裁切）；通信题/交互题未配置子任务时也显示总用时；提交记录里所有代码都提供复制按钮。
 - **v2.8.4** 收尾版本：设置页排版与只读字段统一、细节修正；普通题 / IO 交互 / 函数式交互 / 通信题四类判题语义回归通过；文档补齐。
-- **v2.8.3** 后台已处理的反馈可「再次处理」（预填上次回复、记录处理次数与上次处理人）；每次处理反馈都会站内通知提交者（含二次处理）。
-- 更早版本（v0.1.0 ~ v2.8.2）见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+- 更早版本（v0.1.0 ~ v2.8.3）见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
 ---
 

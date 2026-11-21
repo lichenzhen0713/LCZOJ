@@ -1374,12 +1374,15 @@ function userColor(u) {
   return USER_COLORS.red;
 }
 
-/** 带颜色的加粗用户名链接（昵称统一用用户名；链接使用 UID，兼容用户名） */
-function userSpan(u) {
+/** 带颜色的加粗用户名链接（昵称统一用用户名；链接使用 UID，兼容用户名）
+ *  opts.class / opts.attrs 用于个别页面追加样式类与 data-* 属性（如后台用户管理的点击弹框）。 */
+function userSpan(u, opts) {
   const name = (u && u.username) || (u && u.nickname) || '?';
   const color = userColor(u);
   const ident = (u && (u.uid || u.id)) || u.username || name;
-  return `<a href="#/user/${encodeURIComponent(ident)}" style="color:${color};font-weight:700">${escapeHtml(name)}</a>`;
+  const cls = opts && opts.class ? ` class="${escapeHtml(opts.class)}"` : '';
+  const attrs = opts && opts.attrs ? ' ' + opts.attrs : '';
+  return `<a${cls}${attrs} href="#/user/${encodeURIComponent(ident)}" style="color:${color};font-weight:700">${escapeHtml(name)}</a>`;
 }
 
 /* ---------- 首页 ---------- */
@@ -10578,7 +10581,7 @@ async function renderAdminUsers() {
       return `
       <tr>
         <td>#${u.id}</td>
-        <td>${userSpan({ uid: u.id, username: u.username, nickname: u.username })}${u.banned ? ' <span class="badge" style="background:#ff4d4f;color:#fff">已封禁</span>' : ''}${brownBadge}</td>
+        <td>${userSpan({ uid: u.id, username: u.username, nickname: u.username }, { class: 'admin-user-link', attrs: `data-user-overview="${u.id}" title="查看用户详情"` })}${u.banned ? ' <span class="badge" style="background:#ff4d4f;color:#fff">已封禁</span>' : ''}${brownBadge}</td>
         <td>${roleBadge[u.role] || roleBadge.user}</td>
         <td><span style="color:${u.can_speak ? 'var(--green)' : 'var(--red)'}">${u.can_speak ? '✔ 允许' : '✘ 撤销' + speakTip}</span></td>
         <td><span style="color:${u.can_editorial ? 'var(--green)' : 'var(--red)'}">${u.can_editorial ? '✔ 允许' : '✘ 撤销' + edTip}</span></td>
@@ -10696,6 +10699,125 @@ async function renderAdminUsers() {
   document.querySelectorAll('button[data-profile-edit]').forEach((b) => b.addEventListener('click', () => {
     showAdminProfileEditor(b.dataset.profileEdit, b.dataset.uname);
   }));
+  // v2.9.6：点用户名弹出用户详情（只读）。阻止默认的 #/user/:id 跳转。
+  document.querySelectorAll('a[data-user-overview]').forEach((a) => a.addEventListener('click', (e) => {
+    e.preventDefault();
+    showUserOverview(a.dataset.userOverview);
+  }));
+}
+
+/**
+ * 后台用户管理 → 点用户名：只读用户详情弹框（v2.9.6）。
+ * 基本信息 + 全部违规 / 管理记录（接口 /api/admin/users/:id/overview）。
+ * 关闭方式：右上角 ✕ / 点遮罩 / 按 Esc / 底部「关闭」。
+ * 网络失败只 toast，不抛异常、不影响列表页。
+ */
+let userOverviewSeq = 0;
+async function showUserOverview(uid) {
+  const seq = ++userOverviewSeq;
+  const old = document.getElementById('user-overview-modal');
+  if (old) {
+    if (typeof old.__uoClose === 'function') old.__uoClose();
+    else old.remove();
+  }
+  let data;
+  try {
+    data = await api.get('/api/admin/users/' + encodeURIComponent(uid) + '/overview');
+  } catch (e) {
+    if (seq !== userOverviewSeq) return;
+    const msg = e && e.message && !/failed to fetch|networkerror|load failed/i.test(e.message)
+      ? e.message
+      : '加载用户详情失败，请稍后重试';
+    toast(msg, 'error');
+    return;
+  }
+  // 快速连点两个用户名时，只让最后一次请求的结果落地
+  if (seq !== userOverviewSeq) return;
+  const u = (data && data.user) || {};
+  const st = (data && data.stats) || {};
+  const logs = (data && Array.isArray(data.moderation)) ? data.moderation : [];
+  const ROLE_NAMES = { user: '普通用户', admin: '管理员', superadmin: '超级管理员' };
+  const roleText = ROLE_NAMES[u.role] || (u.is_admin ? '管理员' : '普通用户');
+  const perms = Array.isArray(u.permissions) ? u.permissions : [];
+  const permText = u.is_superadmin || perms.length >= 8
+    ? '全部权限（超级管理员）'
+    : (perms.length ? perms.map((p) => PERM_NAMES[p] || p).join('、') : '无');
+  const nick = u.nickname && u.nickname !== u.username
+    ? ` <span class="muted" style="font-weight:400">（昵称：${escapeHtml(u.nickname)}）</span>` : '';
+  const val = (v, suffix = '') => (v === null || v === undefined || v === '' ? '—' : escapeHtml(String(v)) + suffix);
+  const untilText = (ts) => (ts ? fmtTime(ts) : '永久');
+  const badge = (text, color) => `<span class="badge" style="background:${color};color:#fff">${escapeHtml(text)}</span>`;
+  const statusBadges = [];
+  if (u.banned) statusBadges.push(badge('封禁至 ' + untilText(u.banned_until), '#ff4d4f'));
+  if (u.brown_name) {
+    const typeText = u.brown_type === 'cheat' ? '比赛作弊' : (u.brown_type === 'plagiarism' ? '抄题解' : '棕名');
+    statusBadges.push(badge(`棕名（${typeText}）至 ` + untilText(u.brown_name_until), '#8b5e3c'));
+  }
+  if (!u.can_speak) statusBadges.push(badge('禁言至 ' + untilText(u.can_speak_until), '#fa8c16'));
+  if (!u.can_discuss) statusBadges.push(badge('禁止发布讨论', '#fa8c16'));
+  if (!u.can_reply) statusBadges.push(badge('禁止回复讨论', '#fa8c16'));
+  if (!u.can_editorial) statusBadges.push(badge('禁止发布题解至 ' + untilText(u.can_editorial_until), '#fa8c16'));
+  if (!statusBadges.length) statusBadges.push(badge('正常', '#52c41a'));
+
+  const items = [
+    ['UID', '#' + val(u.id)],
+    ['用户名', `<strong>${escapeHtml(u.username || '—')}</strong>${nick}`],
+    ['角色 / 权限', `${escapeHtml(roleText)}<div class="muted uo-sub">${escapeHtml(permText)}</div>`],
+    ['注册时间', val(u.created_at ? fmtTime(u.created_at) : '')],
+    ['邮箱', val(u.email)],
+    ['状态', `<span class="uo-badges">${statusBadges.join(' ')}</span>`],
+    ['等级分', `${val(u.rating)} <span class="muted uo-sub">（已参加 ${val(u.rated_games)} 场）</span>`],
+    ['通过题数', val(st.solved)],
+    ['提交数 / AC', `${val(st.submissions)} / ${val(st.accepted)}`],
+    ['积分', val(st.points)],
+  ].map(([label, html]) => `<div class="uo-item"><div class="uo-label">${label}</div><div class="uo-value">${html}</div></div>`).join('');
+
+  const toneColor = { bad: '#ff4d4f', good: '#52c41a', info: '#1890ff' };
+  const logsHtml = logs.length
+    ? logs.map((m) => `
+      <div class="uo-log">
+        <div class="uo-log-time muted">${escapeHtml(fmtTime(m.created_at))}</div>
+        <div class="uo-log-body">
+          <div>${badge(m.action_label || m.action || '管理记录', toneColor[m.tone] || '#1890ff')}</div>
+          <div class="uo-log-detail">${escapeHtml(m.detail || '（无说明）')}</div>
+          <div class="muted uo-log-admin">操作人：${escapeHtml(m.admin || '系统')}</div>
+        </div>
+      </div>`).join('')
+    : '<div class="empty" style="padding:18px 0">暂无记录</div>';
+
+  app.insertAdjacentHTML('beforeend', `
+    <div class="modal-backdrop" id="user-overview-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box">
+      <div class="card user-overview-card" role="dialog" aria-modal="true" aria-labelledby="uo-title" style="width:760px;max-width:94vw;max-height:90vh;overflow-y:auto;margin:0;position:relative">
+        <button class="uo-close" id="uo-close" type="button" aria-label="关闭" title="关闭（Esc）">✕</button>
+        <h2 class="card-title" id="uo-title" style="padding-right:34px;margin-bottom:4px">用户详情 <span class="muted" style="font-size:13px;font-weight:400">#${val(u.id)} · ${escapeHtml(u.username || '')}</span></h2>
+        <div class="muted" style="font-size:12px;margin-bottom:14px">只读信息，最多显示最近 100 条违规 / 管理记录。</div>
+        <h3 class="uo-section-title"><i class="fa-solid fa-id-card"></i>基本信息</h3>
+        <div class="uo-grid">${items}</div>
+        <h3 class="uo-section-title"><i class="fa-solid fa-clock-rotate-left"></i>违规记录 <span class="muted" style="font-size:12px;font-weight:400">（含管理操作，按时间倒序）</span></h3>
+        <div class="uo-timeline">${logsHtml}</div>
+        <div class="row" style="margin-top:14px">
+          <div class="spacer"></div>
+          <button class="btn btn-ghost" id="uo-close2" type="button">关闭</button>
+        </div>
+      </div>
+    </div>`);
+
+  const backdrop = document.getElementById('user-overview-modal');
+  const onKey = (e) => {
+    if (e.key === 'Escape' || e.key === 'Esc') {
+      e.preventDefault();
+      close();
+    }
+  };
+  const close = () => {
+    document.removeEventListener('keydown', onKey);
+    if (backdrop && backdrop.parentNode) backdrop.remove();
+  };
+  backdrop.__uoClose = close;
+  document.addEventListener('keydown', onKey);
+  document.getElementById('uo-close').addEventListener('click', close);
+  document.getElementById('uo-close2').addEventListener('click', close);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
 }
 
 /* 管理员编辑用户资料 / 重置密码弹窗 */

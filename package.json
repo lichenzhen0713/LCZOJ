@@ -1,6 +1,6 @@
 {
   "name": "lczoj",
-  "version": "2.9.5",
+  "version": "2.9.6",
   "description": "零外部依赖的在线评测系统 (Online Judge)：Node.js 内置模块实现，支持多语言评测（可上传源码文件）、并行判题与题目重判、网站外观自定义、讨论区与权限管理；支持一键脚本、宝塔/小皮面板与 Docker 部署",
   "main": "server.js",
   "type": "commonjs",
@@ -13,7 +13,7 @@
     "docker:onekey": "node deploy/docker-onekey.js",
     "install:linux": "bash install.sh --no-start",
     "install:win": "install.bat",
-    "docker:build": "docker build -t lczoj:2.9.5 .",
+    "docker:build": "docker build -t lczoj:2.9.6 .",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "xiaopi": "node deploy/xiaopi-onekey.js"

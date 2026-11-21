@@ -6225,3 +6225,52 @@ th.st-problem-th { vertical-align: middle; padding-top: 7px; padding-bottom: 7px
 @media (max-width: 760px) {
   .st-stat { font-size: 11px; }
 }
+
+/* ============================================================================
+   后台用户管理 → 用户详情弹框（v2.9.6）
+   点用户名打开，只读展示基本信息 + 违规 / 管理记录时间线。
+   窄屏（390）下网格退化为单列、时间线改为上下排布，内容只在弹框卡片内纵向滚动，
+   不产生横向溢出（所有文本都允许任意位置换行）。
+   ============================================================================ */
+.admin-user-link { cursor: pointer; }
+.admin-user-link:hover { text-decoration: underline; }
+.user-overview-card { overscroll-behavior: contain; }
+.uo-close {
+  position: absolute; top: 10px; right: 12px;
+  width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px;
+  background: transparent; color: var(--text-light); font-size: 17px; line-height: 1;
+  cursor: pointer;
+}
+.uo-close:hover { background: var(--border); color: var(--text); }
+.uo-section-title {
+  display: flex; align-items: center; gap: 7px;
+  margin: 18px 0 10px; font-size: 14px; line-height: 1.3;
+}
+.uo-section-title:first-of-type { margin-top: 6px; }
+.uo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.uo-item {
+  min-width: 0; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: rgba(127, 127, 127, .04);
+}
+.uo-label { color: var(--text-light); font-size: 12px; margin-bottom: 3px; }
+.uo-value { font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; word-break: break-word; }
+.uo-sub { font-size: 12px; font-weight: 400; margin-top: 2px; }
+.uo-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.uo-timeline { border-left: 2px solid var(--border); margin-left: 4px; padding-left: 14px; }
+.uo-log { position: relative; padding: 0 0 14px; }
+.uo-log:last-child { padding-bottom: 2px; }
+.uo-log::before {
+  content: ''; position: absolute; left: -20px; top: 5px;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 3px var(--card);
+}
+.uo-log-time { font-size: 12px; margin-bottom: 3px; font-variant-numeric: tabular-nums; }
+.uo-log-body { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.uo-log-detail { font-size: 13px; line-height: 1.55; margin-top: 4px; white-space: pre-wrap; }
+.uo-log-admin { font-size: 12px; margin-top: 3px; }
+@media (max-width: 640px) {
+  .uo-grid { grid-template-columns: 1fr; }
+  .uo-timeline { padding-left: 12px; }
+  .uo-log::before { left: -18px; }
+}

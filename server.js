@@ -2248,6 +2248,16 @@ if (seg[0] === 'users' && seg.length === 2 && method === 'GET') {
       return ok(res, discussion.listAllReplies(url.searchParams));
     }
 
+    // 管理端：用户概览（v2.9.6，后台点用户名弹出：基本信息 + 全部违规 / 管理记录）
+    // 权限与「用户管理」一致（requirePerm('user')）；必须放在下面的列表 GET 之前，
+    // 否则 /api/admin/users/:id/overview 会被列表路由抢先匹配成用户列表。
+    if (seg[0] === 'admin' && seg[1] === 'users' && seg.length === 4 && seg[3] === 'overview' && method === 'GET') {
+      const admin = requirePerm('user')(req, res);
+      if (!admin) return;
+      const r = users.getUserOverview(admin, seg[2]);
+      if (r.error) return fail(res, r.status || 400, r.error);
+      return ok(res, r);
+    }
     // 管理端：用户管理（仅超级管理员）
     if (seg[0] === 'admin' && seg[1] === 'users' && method === 'GET') {
       const admin = requirePerm('user')(req, res);

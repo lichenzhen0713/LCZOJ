@@ -9,6 +9,29 @@ const { hasPerm, destroyUserSessions, sanitizeUser, isBuiltinAdminUser, guardBui
 const { markdownToHtml } = require('./markdown');
 const notifications = require('./notifications');
 
+/**
+ * 比赛分时间衰减参数（v2.9.7）。曲线：decay = 1 - 1/(1 + K·(m-GRACE)^P)，上限 CAP。
+ * 默认取"中间档"：停赛 2 个月 ≈ -16%、3 个月 ≈ -30%、6 个月 ≈ -55%、1 年 ≈ -75%，最高扣 85%。
+ * 站点想更严/更松时改环境变量即可，不必改代码：
+ *   OJ_CONTEST_DECAY_GRACE_MONTHS（宽限月数，默认 1；0 = 立刻开始衰减）
+ *   OJ_CONTEST_DECAY_K（曲线陡度，默认 0.194；越大越快）
+ *   OJ_CONTEST_DECAY_P（幂指数，默认 1.143；越大后期掉得越快）
+ *   OJ_CONTEST_DECAY_CAP（最高扣除比例，默认 0.85；0 = 不封顶）
+ */
+const CONTEST_DECAY = (() => {
+  const num = (k, d, min, max) => {
+    const v = Number(process.env[k]);
+    if (!Number.isFinite(v)) return d;
+    return Math.max(min, Math.min(max, v));
+  };
+  return {
+    grace: num('OJ_CONTEST_DECAY_GRACE_MONTHS', 1, 0, 36),
+    k: num('OJ_CONTEST_DECAY_K', 0.194, 0.001, 10),
+    p: num('OJ_CONTEST_DECAY_P', 1.143, 0.1, 5),
+    cap: num('OJ_CONTEST_DECAY_CAP', 0.85, 0, 1),
+  };
+})();
+
 /** 按用户名或 UID 查找用户（标识统一为 uid，兼容用户名） */
 function getProfile(ident, viewer) {
   // 个人中心统一以 UID 为标识，不再支持用户名访问
@@ -346,12 +369,18 @@ function computePoints(userId, standingsCache) {
   // 比赛分 = 各有效场次贡献之和 × 100 × contestScale（0.15，满分仍为 100）：使“名次越好、场次越多”产生可见积分，
   // 避免单场小系数被取整成 0 导致“比赛积分无法计算”。
   let contest = Math.min(contestScore * 100 * POINTS_WEIGHTS.contestScale, 100);
-  // 衰减：距最近有效参赛 > 30 天（幂律，最高扣 90%）
+  // 衰减：距最近有效参赛超过 GRACE 个月后开始（v2.9.7，站长两次反馈后取中间档）
+  //   停赛 2 个月 ≈ -16%、3 个月 ≈ -30%、6 个月 ≈ -55%、1 年 ≈ -75%，最高扣 85%。
+  // 曲线 decay = 1 - 1/(1 + K·(m-GRACE)^P)，四个参数都可用环境变量覆盖：
+  //   OJ_CONTEST_DECAY_GRACE_MONTHS（默认 1）、OJ_CONTEST_DECAY_K（默认 0.194）、
+  //   OJ_CONTEST_DECAY_P（默认 1.143）、OJ_CONTEST_DECAY_CAP（默认 0.85，0 = 不封顶）。
   if (validContests.length) {
     const lastC = validContests[validContests.length - 1].end_time;
     const inactiveMonths = Math.max(0, (now - lastC) / DAY / 30);
-    if (inactiveMonths > 1) {
-      const decay = Math.min(1 - 1 / (1 + 0.3 * Math.pow(inactiveMonths, 1.5)), 0.90);
+    if (inactiveMonths > CONTEST_DECAY.grace) {
+      const over = inactiveMonths - CONTEST_DECAY.grace;
+      let decay = 1 - 1 / (1 + CONTEST_DECAY.k * Math.pow(over, CONTEST_DECAY.p));
+      if (CONTEST_DECAY.cap > 0) decay = Math.min(decay, CONTEST_DECAY.cap);
       contest = contest * (1 - decay);
     }
   }
@@ -711,6 +740,110 @@ function getRatingHistory(userId, recent = 0) {
 }
 
 // ---------------- 用户管理（需要「用户管理」权限） ----------------
+
+/** 后台用户详情的邮箱打码：保留首字符与域名，例如 `a***@x.com`。
+ *  后台弹窗只用于核对身份，不需要完整邮箱；接口层就打码，避免完整地址出现在响应里。 */
+function maskEmailForAdmin(email) {
+  const s = String(email == null ? '' : email).trim();
+  if (!s) return '';
+  const at = s.lastIndexOf('@');
+  if (at <= 0) return s.slice(0, 1) + '***';
+  return s.slice(0, 1) + '***' + s.slice(at);
+}
+
+/**
+ * 后台「用户管理」→ 点用户名弹出的用户概览（v2.9.6）。
+ *
+ * 返回三段：
+ *   · user      基本信息（含权限数组，前端用来显示「角色 / 权限」）
+ *   · stats     积分 + 题库练习统计（积分走现有积分模块，算不出 / 关闭积分时给 null）
+ *   · moderation 该用户的**全部** moderation_logs 记录（不套社区管理页的权限动作白名单），
+ *                按 id 倒序最多 100 条；字段与前端时间线一一对应。
+ *
+ * 权限与「用户管理」一致（route 层 requirePerm('user')，这里再兜一层），
+ * 邮箱按最小必要原则打码；不存在的用户返回 404，绝不抛异常。
+ */
+function getUserOverview(actor, targetId) {
+  if (!hasPerm(actor, 'user')) return { error: '你没有「用户管理」权限', status: 403 };
+  const id = parseInt(targetId, 10);
+  if (!Number.isFinite(id) || id <= 0) return { error: '用户不存在', status: 404 };
+  let u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  if (!u) return { error: '用户不存在', status: 404 };
+  // 惰性到期检查可能改库：命中到期时重读一次，状态徽章不显示已过期的处罚
+  if (checkUserExpiry(id)) u = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+
+  const { parsePermissions, ALL_PERMISSIONS } = require('./auth');
+  const permissions = parsePermissions(u.permissions);
+
+  // 积分：与个人中心 / 排行榜同一套读取规则（manual / interval 优先快照，无快照回退实时）
+  let points = null;
+  try {
+    const settings = require('./settings');
+    if (settings.getSetting('points_enabled', '1') === '1') {
+      const snap = pointsUseSnapshot() ? readPointsSnapshot(id) : null;
+      points = snap ? snap.total : computePoints(id, new Map()).total;
+    }
+  } catch { points = null; }
+
+  // 统计：题库练习口径与个人中心一致（contest_id IS NULL）。
+  // 任何一张表异常都不影响基本信息返回，对应项保持 null。
+  let solved = null;
+  let submissions = null;
+  let accepted = null;
+  try {
+    solved = db.prepare(
+      "SELECT COUNT(DISTINCT problem_id) AS c FROM submissions WHERE user_id = ? AND verdict = 'Accepted' AND contest_id IS NULL"
+    ).get(id).c;
+    submissions = db.prepare('SELECT COUNT(*) AS c FROM submissions WHERE user_id = ? AND contest_id IS NULL').get(id).c;
+    accepted = db.prepare(
+      "SELECT COUNT(*) AS c FROM submissions WHERE user_id = ? AND verdict = 'Accepted' AND contest_id IS NULL"
+    ).get(id).c;
+  } catch { /* 统计失败给 null，不阻塞用户详情 */ }
+
+  const rows = db.prepare(`
+    SELECT id, action, detail, admin_id, admin_name, created_at
+    FROM moderation_logs WHERE user_id = ? ORDER BY id DESC LIMIT 100
+  `).all(id);
+
+  return {
+    user: {
+      id: u.id,
+      username: u.username,
+      nickname: u.nickname || '',
+      email: maskEmailForAdmin(u.email),
+      role: u.role || 'user',
+      is_admin: !!u.is_admin,
+      is_superadmin: permissions.length === ALL_PERMISSIONS.length,
+      permissions,
+      created_at: u.created_at,
+      banned: !!u.banned,
+      banned_until: u.banned_until || 0,
+      brown_name: !!u.brown_name,
+      brown_name_until: u.brown_name_until || 0,
+      brown_type: u.brown_type || '',
+      can_speak: u.can_speak === undefined ? true : !!u.can_speak,
+      can_speak_until: u.can_speak_until || 0,
+      can_discuss: u.can_discuss === undefined ? true : !!u.can_discuss,
+      can_reply: u.can_reply === undefined ? true : !!u.can_reply,
+      can_editorial: u.can_editorial === undefined ? true : !!u.can_editorial,
+      can_editorial_until: u.can_editorial_until || 0,
+      rating: u.rating || 0,
+      rated_games: u.rated_games || 0,
+      username_changes: u.username_changes || 0,
+    },
+    stats: { points, solved, submissions, accepted },
+    moderation: rows.map((r) => ({
+      id: r.id,
+      action: r.action,
+      action_label: actionMeta(r.action).label,
+      tone: actionMeta(r.action).tone,
+      detail: r.detail || '',
+      admin_id: r.admin_id || 0,
+      admin: r.admin_name || '系统',
+      created_at: r.created_at,
+    })),
+  };
+}
 
 function listUsers(query) {
   const { page, size, offset } = parsePagination(query, 20, 50);
@@ -1729,6 +1862,7 @@ module.exports = {
   getRatingHistory,
   getRatingHistoryCount,
   listUsers,
+  getUserOverview,
   updateUserPermissions,
   checkUserExpiry,
   updateProfile,
