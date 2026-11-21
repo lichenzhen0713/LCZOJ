@@ -3023,10 +3023,34 @@ async function judgeSubmission(submissionId) {
   }
   score = Math.max(0, Math.min(100, score));
 
-  const isAC = worst === VERDICTS.AC && score === 100;
-  if (isAC) {
+  // v2.9.3（站长要求）：每个测试点的独立满分。
+  // meta.json 里存在 case_scores 且长度与测试点数一致时，**总分改为各测试点得分之和**；
+  // 子任务分数仍按上面的逻辑算好，继续用于提交详情里的「子任务 N · 满分 / 得分」展示。
+  // case_scores 缺省 / 空数组 / 长度不符 → 完全走上面的原有子任务逻辑（兼容）。
+  const caseScores = testcases.map((t) => t.case_score);
+  const useCaseScores = caseScores.length > 0
+    && caseScores.length === testcases.length
+    && caseScores.every((n) => Number.isFinite(n));
+  let isAC;
+  if (useCaseScores) {
     score = 0;
-    for (const [, st] of subtaskStatus) score += st.score;
+    details.forEach((d, i) => {
+      const raw = d.fraction == null ? (d.verdict === VERDICTS.AC ? 1 : 0) : Number(d.fraction);
+      const frac = Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0;
+      const earned = Math.round(caseScores[i] * frac);
+      d.case_score = caseScores[i];
+      d.case_earned = earned;
+      score += earned;
+    });
+    score = Math.max(0, score);
+    const full = caseScores.reduce((a, b) => a + b, 0);
+    isAC = worst === VERDICTS.AC && score === full;
+  } else {
+    isAC = worst === VERDICTS.AC && score === 100;
+    if (isAC) {
+      score = 0;
+      for (const [, st] of subtaskStatus) score += st.score;
+    }
   }
 
   db.prepare(`

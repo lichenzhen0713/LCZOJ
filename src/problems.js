@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { db, writeTestcases, readTestcases, readCaseLimits, readSubtaskScores, readSubtaskTypes, testcaseCount, checkerPath, problemDir,
   interactorPath, graderPath, listInteractiveHeaders, writeInteractiveAssets, isValidInteractiveHeaderName,
-  readCommunicationConfig } = require('./db');
+  readCommunicationConfig, normalizeCaseScores, readCaseScores, writeCaseScores } = require('./db');
 const { difficultyByLevel, parsePagination, decodeText } = require('./util');
 const { markdownToHtml } = require('./markdown');
 const { DIFFICULTIES } = require('./config');
@@ -537,6 +537,9 @@ function problemToSpec(row) {
     subtask_scores: scores,
     subtask_types: types,
   };
+  // v2.9.3：逐测试点分数一并导出 / 再次导入（未设置时不写该键，保持旧导出格式不变）
+  const caseScores = getCaseScores(row.id);
+  if (caseScores.length) spec.case_scores = caseScores;
   if (checker) spec.checker = checker;
   // 交互题：把交互器 / grader / 头文件也写进导出清单（便于整库导出后再次导入还原）
   const interactor = readFileIfExists(interactorPath(row.id));
@@ -564,7 +567,7 @@ function exportProblem(id) {
         '· import.json          题目清单（可直接用「题目导入」再次导入，含测试数据与子任务分数）',
         '· testdata/<n>.in|out  每个测试点的输入 / 期望输出（与清单内容一致，便于人工查看）',
         '· testdata/checker.cpp Special Judge 的 checker（仅 spj 题目）',
-        '· testdata/meta.json   子任务分组 / 分数 / 计分方式',
+        '· testdata/meta.json   子任务分组 / 分数 / 计分方式 / 逐测试点分数',
         '',
         `导出时间：${new Date().toISOString()}`,
       ].join('\n'),
@@ -790,12 +793,22 @@ function setTestcases(id, cases, meta) {
       memory_limit_mb: c.memory_limit_mb != null && c.memory_limit_mb !== '' ? c.memory_limit_mb : null,
     };
   });
-  const r = writeTestcases(id, clean, meta || {});
+  // v2.9.3：每个测试点独立满分的入参校验（写库前给出明确中文提示，避免静默忽略）
+  const metaIn = meta || {};
+  if (Array.isArray(metaIn.case_scores) && metaIn.case_scores.length) {
+    if (metaIn.case_scores.length !== clean.length) {
+      return { error: `每个测试点的分数个数（${metaIn.case_scores.length}）必须等于测试点数（${clean.length}）` };
+    }
+    if (!normalizeCaseScores(metaIn.case_scores, clean.length).length) {
+      return { error: '每个测试点的分数必须是 0~100 的整数' };
+    }
+  }
+  const r = writeTestcases(id, clean, metaIn);
   // M12：writeTestcases 会「备份 → 清空 → 恢复」目录里的 checker / interactor / grader / *.h，
   // 该行为本身是为了「保存测试数据不弄丢配套文件」，但恢复必须**以当前题目的身份标记为准**：
   // 普通题不应保留上一份数据（或上一个同号题目）留下的 checker / 交互文件。
   pruneStaleAssets(id, row, {});
-  return { id: Number(id), count: r.count, subtasks: r.subtasks };
+  return { id: Number(id), count: r.count, subtasks: r.subtasks, case_scores: readCaseScores(id) };
 }
 
 /**
@@ -846,6 +859,43 @@ function getTestcases(id) {
 
 function getSubtaskScores(id) {
   return readSubtaskScores(id);
+}
+
+/**
+ * v2.9.3：读取每个测试点的独立满分（按 1..N 顺序；未设置 → []，此时按子任务计分）。
+ */
+function getCaseScores(id) {
+  return readCaseScores(id);
+}
+
+/**
+ * v2.9.3：设置 / 清除每个测试点的独立满分（只改 meta.json，不动测试数据本体）。
+ * 校验：数组长度必须等于测试点数、每项为 0~100 的整数；总和建议 100（不等于 100 仍允许保存，
+ * 由后台界面给出「⚠ 建议凑满 100」的提示）。
+ * 传 [] → 清除逐点分数，恢复原有子任务计分（兼容旧行为）。
+ * 返回 { id, count, case_scores, total } 或 { error }。
+ */
+function setCaseScores(id, scores) {
+  const pid = parseInt(id, 10);
+  if (!Number.isFinite(pid)) return { error: '题目不存在' };
+  if (!db.prepare('SELECT id FROM problems WHERE id = ?').get(pid)) return { error: '题目不存在' };
+  const count = testcaseCount(pid);
+  if (!count) return { error: '该题暂无测试数据，无法设置测试点分数' };
+  if (!Array.isArray(scores)) return { error: '缺少 case_scores 数组' };
+  if (scores.length && scores.length !== count) {
+    return { error: `每个测试点的分数个数（${scores.length}）必须等于测试点数（${count}）` };
+  }
+  if (scores.length && !normalizeCaseScores(scores, count).length) {
+    return { error: '每个测试点的分数必须是 0~100 的整数' };
+  }
+  const r = writeCaseScores(pid, scores);
+  if (r.error) return { error: r.error };
+  return {
+    id: pid,
+    count,
+    case_scores: r.case_scores,
+    total: r.case_scores.reduce((a, b) => a + b, 0),
+  };
 }
 
 /** 通信题的题目侧开关（后台编辑页「测试数据」卡片里编辑，随测试数据一起保存） */
@@ -956,6 +1006,14 @@ function uploadTestdataZip(id, zipBase64, meta, opts = {}) {
         ...(oldTypes && oldTypes.length ? { subtask_types: oldTypes } : {}),
       };
     }
+    // v2.9.3：合并上传时若请求未显式给 case_scores，且旧配置的长度仍等于合并后的测试点数，
+    // 则沿用旧的逐测试点分数（避免「合并补充测试点」把已配好的分数清掉）。
+    if (!meta || !Array.isArray(meta.case_scores)) {
+      const oldCaseScores = readCaseScores(id);
+      if (oldCaseScores.length && oldCaseScores.length === cases.length) {
+        finalMeta = { ...finalMeta, case_scores: oldCaseScores };
+      }
+    }
   }
   // writeTestcases 会清空测试数据目录（含旧 checker）；先备份旧 checker，便于新包无 checker 时保留 SPJ 配置
   // writeTestcases 内部会保留目录中已有的 checker.cpp（清空前备份、写后恢复）。
@@ -1032,6 +1090,9 @@ module.exports = {
   setTestcases,
   getTestcases,
   getSubtaskScores,
+  // v2.9.3：每个测试点的独立满分（缺省时不影响原有子任务计分）
+  getCaseScores,
+  setCaseScores,
   getCommunicationConfig,
   getSubtaskTypes,
   getChecker,

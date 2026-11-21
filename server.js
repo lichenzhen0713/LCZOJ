@@ -1640,9 +1640,27 @@ async function handleApi(req, res, url, method, viewer, pathname) {
         testcases: problems.getTestcases(parseInt(seg[1], 10)),
         subtask_scores: problems.getSubtaskScores(parseInt(seg[1], 10)),
         subtask_types: problems.getSubtaskTypes(parseInt(seg[1], 10)),
+        // v2.9.3：每个测试点的独立满分（未设置 → []，此时按子任务计分）
+        case_scores: problems.getCaseScores(parseInt(seg[1], 10)),
         // 通信题的连接方式 / 通信量上限（存在 meta.json 里，后台编辑页用来回显）
         communication: problems.getCommunicationConfig(parseInt(seg[1], 10)),
       });
+    }
+    // v2.9.3：逐测试点分数的独立读写接口（仅管理员；只改 meta.json，不重写测试数据本体）
+    if (seg[0] === 'problems' && seg[2] === 'testdata' && seg[3] === 'case-scores' && method === 'GET') {
+      const admin = requirePerm('problem')(req, res);
+      if (!admin) return;
+      const pid = parseInt(seg[1], 10);
+      return ok(res, { case_scores: problems.getCaseScores(pid), count: require('./src/db').testcaseCount(pid) });
+    }
+    if (seg[0] === 'problems' && seg[2] === 'testdata' && seg[3] === 'case-scores' && method === 'POST') {
+      const admin = requirePerm('problem')(req, res);
+      if (!admin) return;
+      const body = await readBody(req);
+      const scores = body.case_scores !== undefined ? body.case_scores : body.scores;
+      const r = problems.setCaseScores(parseInt(seg[1], 10), scores);
+      if (r.error) return fail(res, 400, r.error);
+      return ok(res, { case_scores: r.case_scores, count: r.count, total: r.total });
     }
     if (seg[0] === 'problems' && seg[2] === 'checker' && method === 'GET') {
       const admin = requirePerm('problem')(req, res);
@@ -1677,7 +1695,7 @@ async function handleApi(req, res, url, method, viewer, pathname) {
       const body = await readBody(req, 256 * 1024 * 1024);
       const r = problems.setTestcases(parseInt(seg[1], 10), body.testcases, body.meta);
       if (r.error) return fail(res, 400, r.error);
-      return ok(res, { count: r.count, subtasks: r.subtasks });
+      return ok(res, { count: r.count, subtasks: r.subtasks, case_scores: r.case_scores || [] });
     }
     // ---------------- 题目附件：管理员上传 / 所有人下载 ----------------
     if (seg[0] === 'problems' && seg[2] === 'attachments') {

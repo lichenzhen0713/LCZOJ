@@ -15,6 +15,7 @@
  *   "is_public": true, "spj": false, "output_only": false, "enable_o2": true,
  *   "testcases": [{ "input": "1 2\n", "output": "3\n", "subtask": 0 }],
  *   "subtask_scores": [100], "subtask_types": ["sum"],
+ *   "case_scores": [50, 30, 20],      // 可选：每个测试点的满分（0~100，长度须等于测试点数）
  *   "checker": "…checker.cpp 源码（spj=true 时可选）"
  * }
  *
@@ -91,6 +92,13 @@ function normalizeSpec(raw, index = 0) {
       testcases,
       subtask_scores: Array.isArray(raw.subtask_scores) ? raw.subtask_scores.map((n) => toInt(n, 0)) : null,
       subtask_types: Array.isArray(raw.subtask_types) ? raw.subtask_types.map((t) => String(t)) : null,
+      // v2.9.3：可选的逐测试点分数。只有长度等于测试点数且每项 0~100 的整数才采纳（非法清单不打断导入）。
+      case_scores: (() => {
+        if (!Array.isArray(raw.case_scores) || raw.case_scores.length === 0) return null;
+        if (raw.case_scores.length !== testcases.length) return null;
+        const nums = raw.case_scores.map((n) => (typeof n === 'number' ? n : parseInt(n, 10)));
+        return nums.every((n) => Number.isInteger(n) && n >= 0 && n <= 100) ? nums : null;
+      })(),
       checker: typeof raw.checker === 'string' ? raw.checker : '',
     },
   };
@@ -207,7 +215,10 @@ function importProblems(list, { overwrite = false, onConflict = '', adminId = 1 
       }
       let count = 0;
       if (spec.testcases.length) {
-        const tr = problems.setTestcases(id, spec.testcases, { subtask_scores: spec.subtask_scores, subtask_types: spec.subtask_types });
+        const meta = { subtask_scores: spec.subtask_scores, subtask_types: spec.subtask_types };
+        // v2.9.3：清单带 case_scores 时一并写入（未带则不传，保持原有子任务计分）
+        if (spec.case_scores) meta.case_scores = spec.case_scores;
+        const tr = problems.setTestcases(id, spec.testcases, meta);
         if (tr.error) { errors.push({ title: spec.title, error: '测试数据写入失败：' + tr.error }); continue; }
         count = tr.count;
       }

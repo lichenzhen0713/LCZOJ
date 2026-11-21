@@ -200,7 +200,7 @@ git pull
 docker compose up -d --build
 ```
 
-镜像标签为 `lczoj:<版本号>`（例如 `lczoj:2.9.2`），旧标签会保留在本机，可用于回滚：
+镜像标签为 `lczoj:<版本号>`（例如 `lczoj:2.9.3`），旧标签会保留在本机，可用于回滚：
 
 ```bash
 # 查看本机已有镜像
@@ -336,3 +336,40 @@ ls -ld <项目目录>                       # 属主是否为服务运行用户�
 | `GET /api/admin/update` | 查询版本信息、更新状态与启动方式（仅 admin） |
 | `GET /api/admin/update/status` | 查询更新进度与日志（仅 admin） |
 | `POST /api/admin/update/start` | 开始更新，参数 `{ backup, restart, force }`（仅 admin） |
+
+---
+
+## 12. 数据安全与恢复
+
+**内置更新（后台「一键更新」/ `node deploy/update.js`）不碰 `data/`**：数据库 `oj.db`、题库测试数据、题目附件、用户头像都不会被覆盖，被替换的只有程序文件（`server.js`、`src/`、`public/`、`docs/` 等）。
+
+更新动手前，脚本会先把数据库备份到 `data/backup/oj-<旧版本>-<时间戳>.db`（例：`data/backup/oj-2.9.1-2026-11-08-03-18-24.db`），只保留最近 10 份。这只含数据库，不含测试数据 / 附件 / 头像。
+
+### 12.1 从备份恢复数据库
+
+先停服务（命令见第 7 节），再执行：
+
+```bash
+cp data/backup/oj-2.9.1-2026-11-08-03-18-24.db data/oj.db   # 换成 ls data/backup/ 里选出的那份
+rm -f data/oj.db-wal data/oj.db-shm                          # 必须删，残留 WAL 会让恢复不生效
+```
+
+然后重启服务。Windows 用 `copy /Y ...` 与 `del /Q ...`。
+
+> 恢复会丢掉备份时间点之后的提交与题目改动，仅在确有必要时使用。
+
+### 12.2 手动覆盖代码时的三个「不要」
+
+- 不要 `rm -rf` 整个项目目录再重新解压——`data/` 就在里面，代码可以重下，数据不行；
+- 不要删 `data/`：`data/backup/` 和 `admin-password.txt` 都在里面，会一起没；
+- 不要用整包覆盖 `deploy/panel.env`：端口 / 监听地址是本机配置，保留原文件。
+
+### 12.3 外部定时备份（强烈建议）
+
+`data/backup/` 位于 `data/` 内部，整个目录丢失时它也会一起丢。请在 `data/` 之外再做一份定时备份，例如每天 03:30 打包、保留 14 天：
+
+```cron
+30 3 * * * cd /www/wwwroot/oj.example.com && tar czf /root/lczoj-backup/data-$(date +\%F).tar.gz data && find /root/lczoj-backup -name 'data-*.tar.gz' -mtime +14 -delete
+```
+
+前置：`sudo mkdir -p /root/lczoj-backup`，并把该行加入 `sudo crontab -e`（crontab 里的 `%` 要写成 `\%`）。完整备份与恢复说明（含迁移、面板定时任务）见 [PANEL.md](PANEL.md) 第 7 节。

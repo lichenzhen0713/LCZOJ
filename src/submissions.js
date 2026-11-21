@@ -446,7 +446,13 @@ function getSubmission(id, viewer) {
   let testcaseMeta = [];
   try {
     testcaseMeta = require('./db').readTestcases(row.problem_id)
-      .map((t) => ({ id: t.id, subtask: t.subtask == null ? 0 : t.subtask, subtask_score: t.subtask_score || 0 }));
+      .map((t) => ({
+        id: t.id,
+        subtask: t.subtask == null ? 0 : t.subtask,
+        subtask_score: t.subtask_score || 0,
+        // v2.9.3：该测试点的独立满分（null = 未启用，按子任务计分）
+        case_score: t.case_score != null ? t.case_score : null,
+      }));
   } catch { /* ignore */ }
   const testcaseCount = testcaseMeta.length;
 

@@ -1829,6 +1829,21 @@ function showPwdMsg(message, type) {
 /* ---------- 题库列表 ---------- */
 /* 仅这些（C/C++ 系）语言支持 O2 优化，提交时才会显示 O2 开关 */
 const O2_LANGS = ['c', 'cpp', 'cpp11', 'cpp98'];
+/* v2.9.3（站长要求）：题库记住上次浏览的页码。
+   - 只存页码数字（key 固定，不携带筛选 / 搜索参数，避免「记住的筛选」污染题库）；
+   - 显式 #/problems?page=N 优先，记忆值只在没有 page 参数时使用；
+   - 越界（记住的页码超过当前总页数）由 renderProblems 回落到第 1 页。 */
+const PROBLEMS_PAGE_KEY = 'lczoj.problems.page';
+function rememberedProblemsPage() {
+  try {
+    const n = parseInt(localStorage.getItem(PROBLEMS_PAGE_KEY) || '', 10);
+    return Number.isFinite(n) && n >= 1 ? n : 1;
+  } catch { return 1; }
+}
+function rememberProblemsPage(page) {
+  const n = parseInt(page, 10);
+  try { if (Number.isFinite(n) && n >= 1) localStorage.setItem(PROBLEMS_PAGE_KEY, String(n)); } catch { /* ignore */ }
+}
 async function renderProblems(query) {
   app.innerHTML = '<div class="loading">加载中…</div>';
   const search = query.get('search') || '';
@@ -1838,7 +1853,10 @@ async function renderProblems(query) {
   const tag = Array.from(tagSet).join(',');
   const source = Array.from(sourceSet).join(',');
   const difficulty = query.get('difficulty') || '';
-  const page = parseInt(query.get('page') || '1', 10);
+  // 显式 page 参数优先；没有该参数时用上次记住的页码（v2.9.3）
+  const hasExplicitPage = query.has('page');
+  let page = parseInt(query.get('page') || '', 10);
+  if (!Number.isFinite(page) || page < 1) page = hasExplicitPage ? 1 : rememberedProblemsPage();
 
   const params = new URLSearchParams({ page: String(page), size: '20' });
   if (search) params.set('search', search);
@@ -1846,7 +1864,16 @@ async function renderProblems(query) {
   if (source) params.set('source', source);
   if (difficulty) params.set('difficulty', difficulty);
 
-  const data = await api.get('/api/problems?' + params.toString());
+  let data = await api.get('/api/problems?' + params.toString());
+  // 越界保护：记住的页码超过当前总页数（题目变少 / 筛选后页数变少）→ 回落第 1 页
+  const totalPages = Math.max(1, Math.ceil((Number(data.total) || 0) / (Number(data.size) || 20)));
+  if (page > totalPages) {
+    page = 1;
+    params.set('page', '1');
+    data = await api.get('/api/problems?' + params.toString());
+  }
+  // 翻页 / 筛选后都把**当前实际页码**记下来，下次进入题库（无 page 参数）时自动回到这里
+  rememberProblemsPage(Number(data.page) || page);
   setPageTitle('题库');
 
   const diffOptions = ['<option value="">全部难度</option>']
@@ -3425,6 +3452,8 @@ function testcaseChip(d) {
   // 悬停提示第一行就写全称，保证缩写成 CE 的方块也能直接看到「Compile Error」
   const lines = [`测试点 #${d.id}（${dv.label}）`, `结果：${dv.label}`];
   if (d.subtask != null) lines.push(`子任务：${d.subtask}`);
+  // v2.9.3：题目设置了逐测试点分数时，悬停显示该点的得分 / 满分
+  if (d.case_score != null) lines.push(`分数：${d.case_earned != null ? d.case_earned : '—'} / ${d.case_score}`);
   if (d.time_ms != null) lines.push(`用时：${fmtDuration(d.time_ms)}`);
   if (memSampled === false) lines.push('内存：未采样（本次评测未采集到内存数据）');
   else lines.push(`内存：${memText}`);
@@ -5710,7 +5739,7 @@ async function renderAdminProblemImport() {
         <summary style="cursor:pointer;font-size:13px">字段说明 / ZIP 包结构</summary>
         <div class="statement" style="margin-top:8px;font-size:13px">
           <p><b>题目字段</b>：<code>title</code>（必填）、<code>description</code>、<code>input_format</code>、<code>output_format</code>、<code>samples</code>、<code>hint</code>、<code>tags</code>、<code>source</code>、<code>difficulty</code>（0~7）、<code>time_limit_ms</code>、<code>memory_limit_mb</code>、<code>is_public</code>、<code>spj</code>、<code>output_only</code>、<code>enable_o2</code>。</p>
-          <p><b>测试数据</b>：<code>testcases: [{"input": "...", "output": "...", "subtask": 0}]</code>；子任务分数/计分方式用 <code>subtask_scores: [30,70]</code> 与 <code>subtask_types: ["sum","bundle"]</code>。</p>
+          <p><b>测试数据</b>：<code>testcases: [{"input": "...", "output": "...", "subtask": 0}]</code>；子任务分数/计分方式用 <code>subtask_scores: [30,70]</code> 与 <code>subtask_types: ["sum","bundle"]</code>；也可用 <code>case_scores: [50,30,20]</code> 给每个测试点单独设分数（可选，留空则按子任务计分）。</p>
           <p><b>Special Judge</b>：<code>spj: true</code> 并在 <code>checker</code> 里放 checker 源码（读入 in/out/ans 三个文件）。</p>
           <p><b>ZIP 包</b>：<code>import.json</code> 里每个题目写 <code>"dir": "p1"</code>，包内 <code>p1/1.in</code>、<code>p1/1.out</code>、<code>p1/checker.cpp</code>。</p>
         </div>
@@ -5886,6 +5915,8 @@ async function renderAdminProblemEditor(id) {
   let testcases = [];
   let subtaskScores = [];
   let subtaskTypes = [];
+  // v2.9.3：每个测试点的独立满分（未设置 → []，按子任务分数计分）
+  let caseScores = [];
   let checkerContent = '';
   let checkerExists = false;
   if (id) {
@@ -5895,12 +5926,18 @@ async function renderAdminProblemEditor(id) {
     testcases = tdata.testcases || [];
     subtaskScores = tdata.subtask_scores || [];
     subtaskTypes = tdata.subtask_types || [];
+    caseScores = Array.isArray(tdata.case_scores) ? tdata.case_scores : [];
     try {
       const cdata = await api.get(`/api/problems/${id}/checker`);
       checkerContent = cdata.content || '';
       checkerExists = !!cdata.content;
     } catch (e) { checkerContent = ''; checkerExists = false; }
   }
+  // v2.9.3 双向实时联动：进入页面时是否已有真实的 case_scores；用户是否改动过分数（决定保存时是否写 case_scores）
+  const hadCaseScores = testcases.length > 0
+    && caseScores.length === testcases.length
+    && caseScores.every((n) => Number.isFinite(Number(n)));
+  let caseScoresDirty = false;
 
   const diffOptions = Store.difficulties.map((d) =>
     `<option value="${d.level}" ${problem && problem.difficulty === d.level ? 'selected' : ''}>${escapeHtml(d.label)}</option>`).join('');
@@ -5988,12 +6025,269 @@ async function renderAdminProblemEditor(id) {
     const v = (value != null && value !== '') ? value : '';
     return `<input class="input ${cls}" type="number" min="1" step="1" value="${v}" placeholder="继承 ${inherit}" title="留空则继承题目级限额（${inherit}）" style="width:96px;padding:4px 6px" />`;
   };
+  /**
+   * v2.9.3 逐测试点分数输入框：每个测试点可单独设置满分（0~100 整数）。
+   * 全部留空 = 不启用逐点计分，仍按上方「子任务分数」计分（与旧行为完全一致）。
+   */
+  const caseScoreInput = (i) => {
+    const v = caseScores[i] != null ? caseScores[i] : '';
+    return `<input class="input tc-score" type="number" min="0" max="100" step="1" value="${v}" placeholder="留空" title="该测试点的满分（0~100 整数）；全部留空 = 按上方子任务分数计分" style="width:70px;padding:4px 6px" />`;
+  };
+  /* ---------------- v2.9.3 双向实时联动：子任务分数 ⇄ 测试点分数 ----------------
+   * 站长要求（输入即生效，不用点保存）：
+   *   · A 改测试点分数 → 该子任务分数实时更新（sum = 组内各点之和；bundle/min/max = 组内满额）。
+   *   · B 改子任务分数 → 组内测试点实时重算：
+   *        sum：每点 = 子任务分数 ÷ n 向下取整，余数补给组内第一个点（站长给的期望值是 34/33/33）；
+   *        bundle/min/max：组内每点都等于该子任务分数（30 分 + 3 点 → 30/30/30）。
+   *   · C 改子任务计分方式 → 立即按新方式 + 当前子任务分数重新分配。
+   *   · D 旧题目没有 case_scores 时，进入页面只按子任务配置推导显示，不写库；
+   *        只有用户改动过分数 / 结构，保存时才把 case_scores 一起写入。
+   *   · F 测试点分数 0~100 整数；新增 / 删除测试点、改子任务编号后按规则重新推导，不出现 NaN / 空值。
+   */
+  const parseSubtaskScores = () => {
+    const el = document.getElementById('tc-subtask-scores');
+    if (!el) return [];
+    return String(el.value || '').split(/[,，]/).map((s) => {
+      const t = s.trim();
+      if (!t) return null;
+      const n = parseInt(t, 10);
+      if (!Number.isFinite(n)) return null; // 正在输入 / 非法：这一项暂不参与换算
+      return Math.max(0, Math.min(100, n));
+    });
+  };
+  /** 解析计分方式；不足部分按后端缺省规则补齐（单子任务 sum，多子任务 bundle），非法值同样回落到缺省 */
+  const parseSubtaskTypes = (groupCount) => {
+    const el = document.getElementById('tc-subtask-types');
+    const raw = el ? String(el.value || '').split(/[,，]/).map((s) => s.trim().toLowerCase()) : [];
+    const def = groupCount <= 1 ? 'sum' : 'bundle';
+    const out = [];
+    for (let i = 0; i < groupCount; i++) {
+      const t = raw[i];
+      out.push(['sum', 'min', 'max', 'bundle'].includes(t) ? t : def);
+    }
+    return out;
+  };
+  /** 按「子任务编号在测试点列表中首次出现的顺序」分组（与后端 writeTestcases 的编号顺序完全一致） */
+  const collectCaseGroups = () => {
+    const groups = [];
+    const map = new Map();
+    document.querySelectorAll('.tc-row').forEach((row) => {
+      const raw = parseInt(row.querySelector('.tc-subtask').value, 10);
+      const key = Number.isFinite(raw) ? raw : 0;
+      let g = map.get(key);
+      if (!g) { g = { key, rows: [] }; map.set(key, g); groups.push(g); }
+      g.rows.push(row);
+    });
+    return groups;
+  };
+  const caseScoreOf = (row) => {
+    const el = row.querySelector('.tc-score');
+    const n = parseInt(el ? el.value : '', 10);
+    return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
+  };
+  const setCaseScore = (row, value) => {
+    const el = row.querySelector('.tc-score');
+    if (!el) return;
+    const v = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+    if (String(el.value) !== String(v)) el.value = String(v);
+  };
+  /** 只有 sum 是「按平均分下发」；bundle / min / max 都按「每点满额」处理 */
+  const isAverageType = (type) => type === 'sum';
+  /** A：由组内测试点分数推导子任务分数：sum = 各点之和；其它 = 组内最大点分（即每点满额） */
+  const deriveSubtaskScore = (group, type) => {
+    const vals = group.rows.map(caseScoreOf);
+    if (!vals.length) return 0;
+    const v = isAverageType(type) ? vals.reduce((a, b) => a + b, 0) : Math.max(...vals);
+    return Math.max(0, Math.min(100, Math.round(v)));
+  };
+  /** B/C：把子任务分数下发到组内测试点（sum 平均分 + 余数给第一个点；其它每点都是该值） */
+  const distributeGroupScore = (group, score, type) => {
+    const n = group.rows.length;
+    if (!n) return;
+    const S = Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
+    if (isAverageType(type)) {
+      const base = Math.floor(S / n);
+      let rem = S - base * n;
+      group.rows.forEach((row, i) => {
+        let v = base;
+        if (i === 0 && rem > 0) { v += rem; rem = 0; }
+        setCaseScore(row, v);
+      });
+    } else {
+      group.rows.forEach((row) => setCaseScore(row, S));
+    }
+  };
+  /** 写回两个输入框（默认都写；正在输入的框可以传 opts 跳过，避免打断光标） */
+  const writeSubtaskInputs = (groups, scores, types, opts = {}) => {
+    const sEl = document.getElementById('tc-subtask-scores');
+    const tEl = document.getElementById('tc-subtask-types');
+    if (sEl && opts.scores !== false) {
+      const v = scores.join(',');
+      if (String(sEl.value) !== v) sEl.value = v;
+    }
+    if (tEl && opts.types !== false) {
+      const v = types.join(',');
+      if (String(tEl.value) !== v) tEl.value = v;
+    }
+  };
+  let lastSubtaskScores = [];
+  let lastSubtaskTypes = [];
+  const rememberSubtaskState = (scores, types) => {
+    lastSubtaskScores = scores.slice();
+    lastSubtaskTypes = types.slice();
+  };
+  /** 用户编辑某个测试点分数：先夹到 0~100 整数，再实时同步子任务分数与合计 */
+  function onCaseScoreInput(el) {
+    const n = parseInt(el.value, 10);
+    if (Number.isFinite(n)) {
+      const c = Math.max(0, Math.min(100, n));
+      if (String(n) !== String(c)) el.value = String(c);
+    }
+    // bundle / min / max：组内每点都应等于子任务分数。用户改动其中一点时，
+    // 把该点的值当作新的「满额」，把同组其它点拉齐，避免出现「组内合计 ≠ n×S」。
+    const row = el.closest ? el.closest('.tc-row') : null;
+    if (row) {
+      const groups = collectCaseGroups();
+      const types = parseSubtaskTypes(groups.length);
+      const gi = groups.findIndex((g) => g.rows.includes(row));
+      if (gi >= 0 && !isAverageType(types[gi])) {
+        distributeGroupScore(groups[gi], caseScoreOf(row), types[gi]);
+      }
+    }
+    syncSubtaskScoresFromCases();
+  }
+  /** A：改测试点分数 → 实时重算子任务分数 + 合计提示（不改正在输入的测试点框） */
+  function syncSubtaskScoresFromCases() {
+    const groups = collectCaseGroups();
+    if (!groups.length) { updateCaseScoreTotal(); return; }
+    const types = parseSubtaskTypes(groups.length);
+    const scores = groups.map((g, i) => deriveSubtaskScore(g, types[i]));
+    writeSubtaskInputs(groups, scores, types, { types: false });
+    rememberSubtaskState(scores, types);
+    updateCaseScoreTotal();
+    caseScoresDirty = true;
+  }
+  /** B：改子任务分数 → 只重算「被改动的那几组」的测试点分数（避免误覆盖其它组） */
+  function onSubtaskScoreInput() {
+    const groups = collectCaseGroups();
+    if (!groups.length) { updateCaseScoreTotal(); return; }
+    const types = parseSubtaskTypes(groups.length);
+    const scores = parseSubtaskScores();
+    const changed = new Set();
+    for (let i = 0; i < groups.length; i++) {
+      const s = scores[i];
+      if (s != null && s !== lastSubtaskScores[i]) changed.add(i);
+    }
+    if (!changed.size) return;
+    groups.forEach((g, i) => {
+      if (changed.has(i) && scores[i] != null) distributeGroupScore(g, scores[i], types[i]);
+    });
+    const finalScores = groups.map((g, i) => (scores[i] != null ? scores[i] : deriveSubtaskScore(g, types[i])));
+    // 注意：这里**不重写用户正在输入的分数框**（否则输入逗号分隔的多个分数会被打断），
+    // 只在失焦（change）时整理成实际生效值；测试点分数与合计已实时更新。
+    rememberSubtaskState(finalScores, types);
+    updateCaseScoreTotal();
+    caseScoresDirty = true;
+  }
+  /** C：改子任务计分方式 → 用当前子任务分数按新方式重新分配（不重写正在输入的计分方式框） */
+  function onSubtaskTypeInput() {
+    const groups = collectCaseGroups();
+    if (!groups.length) return;
+    const types = parseSubtaskTypes(groups.length);
+    const scores = parseSubtaskScores();
+    const changed = new Set();
+    for (let i = 0; i < groups.length; i++) {
+      if (types[i] !== lastSubtaskTypes[i]) changed.add(i);
+    }
+    if (!changed.size) return;
+    groups.forEach((g, i) => {
+      if (!changed.has(i)) return;
+      const s = scores[i] != null ? scores[i] : deriveSubtaskScore(g, lastSubtaskTypes[i] || types[i]);
+      distributeGroupScore(g, s, types[i]);
+    });
+    const finalScores = groups.map((g, i) => (scores[i] != null ? scores[i] : deriveSubtaskScore(g, types[i])));
+    writeSubtaskInputs(groups, finalScores, types, { types: false });
+    rememberSubtaskState(finalScores, types);
+    updateCaseScoreTotal();
+    caseScoresDirty = true;
+  }
+  /** F：新增 / 删除测试点、改子任务编号 → 按当前测试点分数重新推导子任务分数；bundle 组再拉齐每点 */
+  function syncAfterStructureChange() {
+    const groups = collectCaseGroups();
+    if (!groups.length) { updateCaseScoreTotal(); return; }
+    const types = parseSubtaskTypes(groups.length);
+    const scores = groups.map((g, i) => deriveSubtaskScore(g, types[i]));
+    writeSubtaskInputs(groups, scores, types);
+    groups.forEach((g, i) => { if (!isAverageType(types[i])) distributeGroupScore(g, scores[i], types[i]); });
+    rememberSubtaskState(scores, types);
+    updateCaseScoreTotal();
+    caseScoresDirty = true;
+  }
+  /** 逐测试点分数的合计提示：合计 100 → ✓；否则 ⚠ 建议凑满 100 */
+  function updateCaseScoreTotal() {
+    const box = document.getElementById('tc-score-sum');
+    if (!box) return;
+    const vals = Array.from(document.querySelectorAll('.tc-row .tc-score')).map((el) => String(el.value || '').trim());
+    if (!vals.length) { box.textContent = ''; return; }
+    const filled = vals.filter((v) => v !== '');
+    if (!filled.length) {
+      box.textContent = '每个测试点分数：全部留空 → 按上方子任务分数计分';
+      box.style.color = '';
+      return;
+    }
+    if (filled.length !== vals.length) {
+      box.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> 还有测试点未填分数：要么每个测试点都填，要么全部留空（按子任务分数计分）';
+      box.style.color = 'var(--orange)';
+      return;
+    }
+    const nums = vals.map((v) => (/^\d+$/.test(v) ? parseInt(v, 10) : NaN));
+    if (nums.some((n) => !Number.isFinite(n) || n < 0 || n > 100)) {
+      box.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> 每个测试点的分数必须是 0~100 的整数';
+      box.style.color = 'var(--red)';
+      return;
+    }
+    const total = nums.reduce((a, b) => a + b, 0);
+    if (total === 100) {
+      box.textContent = '合计 100 分 ✓';
+      box.style.color = 'var(--green)';
+    } else {
+      box.textContent = `合计 ${total} 分 ⚠ 建议凑满 100`;
+      box.style.color = 'var(--orange)';
+    }
+  }
+  /**
+   * D：初始化。
+   *   · 已有 case_scores → 测试点用真实值回显，子任务分数按联动规则同步显示；
+   *   · 没有 case_scores → 用子任务配置推导一组测试点分数显示，但不写库（caseScoresDirty 保持 false）。
+   */
+  function initCaseScoreSync() {
+    const groups = collectCaseGroups();
+    if (!groups.length) { updateCaseScoreTotal(); return; }
+    const types = parseSubtaskTypes(groups.length);
+    let scores;
+    if (hadCaseScores) {
+      scores = groups.map((g, i) => deriveSubtaskScore(g, types[i]));
+      writeSubtaskInputs(groups, scores, types);
+    } else {
+      const base = Math.floor(100 / groups.length);
+      scores = groups.map((g, i) => {
+        const raw = parseInt(subtaskScores[i], 10);
+        if (Number.isFinite(raw)) return Math.max(0, Math.min(100, raw));
+        return i === groups.length - 1 ? 100 - base * (groups.length - 1) : base;
+      });
+      writeSubtaskInputs(groups, scores, types);
+      groups.forEach((g, i) => distributeGroupScore(g, scores[i], types[i]));
+    }
+    rememberSubtaskState(scores, types);
+    updateCaseScoreTotal();
+    caseScoresDirty = false;
+  }
   // 占位符里显示的「继承到的值」＝题目级限额（新建题目尚无题目行时用与表单一致的默认值）
   const inheritTl = (problem && problem.time_limit_ms != null) ? problem.time_limit_ms : 1000;
   const inheritMem = (problem && problem.memory_limit_mb != null) ? problem.memory_limit_mb : 256;
   const tcHtml = testcases.map((t, i) => `
     <div class="tc-row" data-i="${i}" data-orig="${t.id}" data-keep-input="${t.input_truncated ? '1' : '0'}" data-keep-output="${t.output_truncated ? '1' : '0'}" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">
-      <div class="row" style="margin-bottom:8px;gap:12px;align-items:center"><strong>测试点 ${i + 1}</strong><label class="muted" style="margin:0">子任务编号 <input class="input tc-subtask" type="number" min="0" value="${t.subtask != null ? t.subtask : 0}" style="width:70px;padding:4px 6px" /></label><label class="muted" style="margin:0">时限 (ms) ${caseLimitInput('tc-tl', t.time_limit_ms, inheritTl)}</label><label class="muted" style="margin:0">内存 (MB) ${caseLimitInput('tc-mem', t.memory_limit_mb, inheritMem)}</label><div class="spacer"></div><button class="btn btn-ghost btn-sm del-tc" type="button"><i class="fa-solid fa-trash-can"></i>删除</button></div>
+      <div class="row" style="margin-bottom:8px;gap:12px;align-items:center"><strong>测试点 ${i + 1}</strong><label class="muted" style="margin:0">子任务编号 <input class="input tc-subtask" type="number" min="0" value="${t.subtask != null ? t.subtask : 0}" style="width:70px;padding:4px 6px" /></label><label class="muted" style="margin:0">分数 ${caseScoreInput(i)}</label><label class="muted" style="margin:0">时限 (ms) ${caseLimitInput('tc-tl', t.time_limit_ms, inheritTl)}</label><label class="muted" style="margin:0">内存 (MB) ${caseLimitInput('tc-mem', t.memory_limit_mb, inheritMem)}</label><div class="spacer"></div><button class="btn btn-ghost btn-sm del-tc" type="button"><i class="fa-solid fa-trash-can"></i>删除</button></div>
       <div class="tc-editor">
         ${tcField(t, 'input', '输入 (.in)')}
         ${tcField(t, 'output', '输出 (.out)')}
@@ -6186,11 +6480,13 @@ async function renderAdminProblemEditor(id) {
         </div>
       </div>
       <div class="row" style="gap:16px">
-        <div class="form-group" style="flex:1"><label>子任务分数（逗号分隔，如 30,70；留空则平均分配共 100 分）</label><input class="input" id="tc-subtask-scores" value="${subtaskScores.join(',')}" placeholder="留空平均分配" /></div>
+        <div class="form-group" style="flex:1"><label>子任务分数（逗号分隔，如 30,70；留空则平均分配共 100 分，填写时按实际值保存）</label><input class="input" id="tc-subtask-scores" value="${subtaskScores.join(',')}" placeholder="留空平均分配" /></div>
         <div class="form-group" style="flex:1"><label>子任务计分方式（逗号分隔，顺序对应子任务）</label><input class="input" id="tc-subtask-types" value="${subtaskTypes.join(',')}" placeholder="bundle（捆绑：全对才得分）" />
           <div class="muted" style="font-size:12px;margin-top:2px">sum=加和 · min=最小值 · max=最大值 · bundle=捆绑（全对才得分）；<b>只有一个子任务时默认为 sum</b>，详见<a href="/docs/USAGE.md#6-子任务计分方式sum-min-max-bundle" target="_blank" rel="noopener">使用说明</a></div>
         </div>
       </div>
+      <div id="tc-score-sum" class="muted" style="font-size:12px;margin:-4px 0 10px"></div>
+      <p class="muted" style="font-size:12px;margin-top:-4px">下方每个测试点都可以单独填写「分数」（0~100）：改测试点分数会自动更新所属子任务分数；改子任务分数 / 计分方式会按 <b>sum 平均分</b>（余数补给第一个点）或 <b>bundle 每点满额</b>自动重算测试点分数，<b>输入即生效</b>，不需要点保存。</p>
       <div id="tc-container">${tcHtml || '<div class="empty">暂无测试数据</div>'}</div>
       <button class="btn btn-ghost btn-sm" id="add-tc" type="button"><i class="fa-solid fa-plus"></i>添加测试点</button>
       <div class="row mt">
@@ -6241,7 +6537,7 @@ async function renderAdminProblemEditor(id) {
     const curMem = (curMemInput && curMemInput.value !== '') ? curMemInput.value : 256;
     host.insertAdjacentHTML('beforeend', `
       <div class="tc-row" data-i="${i}" data-orig="" data-keep-input="0" data-keep-output="0" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">
-        <div class="row" style="margin-bottom:8px;gap:12px;align-items:center"><strong>测试点 ${i + 1}</strong><label class="muted" style="margin:0">子任务编号 <input class="input tc-subtask" type="number" min="0" value="0" style="width:70px;padding:4px 6px" /></label><label class="muted" style="margin:0">时限 (ms) ${caseLimitInput('tc-tl', '', curTl)}</label><label class="muted" style="margin:0">内存 (MB) ${caseLimitInput('tc-mem', '', curMem)}</label><div class="spacer"></div><button class="btn btn-ghost btn-sm del-tc" type="button"><i class="fa-solid fa-trash-can"></i>删除</button></div>
+        <div class="row" style="margin-bottom:8px;gap:12px;align-items:center"><strong>测试点 ${i + 1}</strong><label class="muted" style="margin:0">子任务编号 <input class="input tc-subtask" type="number" min="0" value="0" style="width:70px;padding:4px 6px" /></label><label class="muted" style="margin:0">分数 <input class="input tc-score" type="number" min="0" max="100" step="1" value="" placeholder="留空" title="该测试点的满分（0~100 整数）；全部留空 = 按上方子任务分数计分" style="width:70px;padding:4px 6px" /></label><label class="muted" style="margin:0">时限 (ms) ${caseLimitInput('tc-tl', '', curTl)}</label><label class="muted" style="margin:0">内存 (MB) ${caseLimitInput('tc-mem', '', curMem)}</label><div class="spacer"></div><button class="btn btn-ghost btn-sm del-tc" type="button"><i class="fa-solid fa-trash-can"></i>删除</button></div>
         <div class="tc-editor">
           <div>
             <div class="row" style="justify-content:space-between;margin-bottom:4px"><label class="muted">输入 (.in)</label><button type="button" class="btn btn-ghost btn-sm tc-file-btn" data-k="input"><i class="fa-solid fa-folder-open"></i>选择文件</button></div>
@@ -6255,10 +6551,14 @@ async function renderAdminProblemEditor(id) {
       </div>`);
     bindRemove('.del-tc', '.tc-row');
     bindTcFiles();
+    // v2.9.3：新增测试点后按当前子任务分数重新推导（sum 平均分 / bundle 每点满额）
+    syncAfterStructureChange();
   });
   bindRemove('.del-sample', '.sample-row');
   bindRemove('.del-tc', '.tc-row');
   bindTcFiles();
+  // v2.9.3：初始化「子任务分数 ⇄ 测试点分数」双向联动（旧题目只推导显示、不写库）
+  initCaseScoreSync();
   // 题面 Markdown/LaTeX 实时预览
   bindLivePreview('f-bg', 'pv-bg');
   bindLivePreview('f-desc', 'pv-desc');
@@ -6463,6 +6763,8 @@ async function renderAdminProblemEditor(id) {
     document.querySelectorAll(btnSel).forEach((b) => b.addEventListener('click', () => {
       b.closest(rowSel).remove();
       renumber(rowSel);
+      // v2.9.3：删除测试点后按剩余测试点重新推导子任务分数
+      if (rowSel === '.tc-row') syncAfterStructureChange();
     }));
   }
   function renumber(rowSel) {
@@ -6500,12 +6802,54 @@ async function renderAdminProblemEditor(id) {
   const tcContainerEl = document.getElementById('tc-container');
   if (tcContainerEl) {
     tcContainerEl.addEventListener('input', (e) => {
-      const ta = e.target;
-      if (!ta.matches || !ta.matches('textarea[data-k]')) return;
-      const row = ta.closest('.tc-row');
+      const t = e.target;
+      // v2.9.3：改测试点分数 → 实时同步子任务分数与合计
+      if (t && t.classList && t.classList.contains('tc-score')) { onCaseScoreInput(t); return; }
+      if (!t.matches || !t.matches('textarea[data-k]')) return;
+      const row = t.closest('.tc-row');
       if (!row) return;
-      const k = ta.dataset.k;
+      const k = t.dataset.k;
       row.dataset[`keep${k === 'input' ? 'Input' : 'Output'}`] = '0';
+    });
+    // v2.9.3：清空测试点分数框后补 0，避免空值 / NaN
+    tcContainerEl.addEventListener('focusout', (e) => {
+      const t = e.target;
+      if (t && t.classList && t.classList.contains('tc-score') && String(t.value).trim() === '') {
+        t.value = '0';
+        onCaseScoreInput(t);
+      }
+    });
+    // v2.9.3：改子任务编号属于结构调整 → 重新分组推导
+    tcContainerEl.addEventListener('change', (e) => {
+      const t = e.target;
+      if (t && t.classList && t.classList.contains('tc-subtask')) syncAfterStructureChange();
+    });
+  }
+  // v2.9.3：子任务分数 / 计分方式输入即生效（输入时实时联动；失焦时把输入框整理成实际生效值）
+  const subtaskScoresEl = document.getElementById('tc-subtask-scores');
+  if (subtaskScoresEl) {
+    subtaskScoresEl.addEventListener('input', onSubtaskScoreInput);
+    subtaskScoresEl.addEventListener('change', () => {
+      onSubtaskScoreInput();
+      const groups = collectCaseGroups();
+      const types = parseSubtaskTypes(groups.length);
+      const parsed = parseSubtaskScores();
+      const scores = groups.map((g, i) => (parsed[i] != null ? parsed[i] : deriveSubtaskScore(g, types[i])));
+      writeSubtaskInputs(groups, scores, types, { types: false });
+      rememberSubtaskState(scores, types);
+    });
+  }
+  const subtaskTypesEl = document.getElementById('tc-subtask-types');
+  if (subtaskTypesEl) {
+    subtaskTypesEl.addEventListener('input', onSubtaskTypeInput);
+    subtaskTypesEl.addEventListener('change', () => {
+      onSubtaskTypeInput();
+      const groups = collectCaseGroups();
+      const types = parseSubtaskTypes(groups.length);
+      const parsed = parseSubtaskScores();
+      const scores = groups.map((g, i) => (parsed[i] != null ? parsed[i] : deriveSubtaskScore(g, types[i])));
+      writeSubtaskInputs(groups, scores, types);
+      rememberSubtaskState(scores, types);
     });
   }
 
@@ -6688,6 +7032,7 @@ async function renderAdminProblemEditor(id) {
   document.getElementById('save-tc').addEventListener('click', async () => {
     if (!id) return toast('请先保存题目信息', 'error');
     const tcs = [];
+    const caseScoreRaw = [];
     document.querySelectorAll('.tc-row').forEach((r) => {
       // 注意：行内还有 data-k 的「选择文件」按钮，必须限定 textarea 选择器
       const input = r.querySelector('textarea[data-k="input"]').value;
@@ -6701,6 +7046,9 @@ async function renderAdminProblemEditor(id) {
       const memEl = r.querySelector('.tc-mem');
       const tl = tlEl ? parseInt(tlEl.value, 10) : NaN;
       const mem = memEl ? parseInt(memEl.value, 10) : NaN;
+      // v2.9.3 逐测试点分数：留空 = 该点未填（全部留空 = 不启用逐点计分）
+      const scoreEl = r.querySelector('.tc-score');
+      caseScoreRaw.push(scoreEl ? String(scoreEl.value || '').trim() : '');
       tcs.push({
         // 保留标志为真时，服务端忽略 input/output 内容，直接沿用磁盘上的完整数据
         input,
@@ -6714,15 +7062,36 @@ async function renderAdminProblemEditor(id) {
       });
     });
     if (tcs.length === 0) return toast('至少需要一个测试点', 'error');
-    const scoresRaw = document.getElementById('tc-subtask-scores').value.trim();
-    const typesRaw = document.getElementById('tc-subtask-types').value.trim();
+    // v2.9.3（双向联动）：子任务分数 / 计分方式按「测试点列表中首次出现的子任务顺序」写回，
+    // 与后端 writeTestcases 的分组编号顺序一致；输入框里的缺项用联动规则推导补齐。
+    const groups = collectCaseGroups();
+    const subtaskTypesToSave = parseSubtaskTypes(groups.length);
+    const parsedSubtaskScores = parseSubtaskScores();
+    const subtaskScoresToSave = groups.map((g, i) => (
+      parsedSubtaskScores[i] != null ? parsedSubtaskScores[i] : deriveSubtaskScore(g, subtaskTypesToSave[i])
+    ));
+    // 把输入框整理成即将保存的值（保存成功后重新渲染会以此为回显）
+    writeSubtaskInputs(groups, subtaskScoresToSave, subtaskTypesToSave);
+
+    // 逐测试点分数：全部留空 = 清除（恢复子任务计分）；个别留空按 0 处理（联动后一般不会出现空值）
+    const allBlank = caseScoreRaw.every((v) => v === '');
+    let caseScoresToSave = [];
+    let caseScoreTotal = 0;
+    if (!allBlank) {
+      if (caseScoreRaw.some((v) => v !== '' && (!/^\d+$/.test(v) || Number(v) > 100))) {
+        return toast('每个测试点的分数必须是 0~100 的整数', 'error');
+      }
+      caseScoresToSave = caseScoreRaw.map((v) => (v === '' ? 0 : parseInt(v, 10)));
+      caseScoreTotal = caseScoresToSave.reduce((a, b) => a + b, 0);
+    }
+    // D：旧题目（进入时没有 case_scores）如果用户没改过分数 / 结构，保存时不写 case_scores，
+    //    继续沿用原有子任务计分；有改动或本来就有 case_scores 才写入（保证界面与库一致）。
+    const saveCaseScores = caseScoresDirty || hadCaseScores;
+
     const meta = {};
-    if (scoresRaw) {
-      meta.subtask_scores = scoresRaw.split(/[,，]/).map((s) => parseInt(s.trim(), 10)).filter((n) => Number.isFinite(n));
-    }
-    if (typesRaw) {
-      meta.subtask_types = typesRaw.split(/[,，]/).map((s) => s.trim().toLowerCase()).filter((t) => ['sum', 'min', 'max', 'bundle'].includes(t));
-    }
+    if (saveCaseScores) meta.case_scores = caseScoresToSave;
+    meta.subtask_scores = subtaskScoresToSave;
+    meta.subtask_types = subtaskTypesToSave;
     // 通信题的题目侧开关（连接方式 / 程序一输出上限 / duplex）随测试数据一起保存进 meta.json
     const pmEl = document.getElementById('f-pipemode');
     if (pmEl) {
@@ -6735,7 +7104,11 @@ async function renderAdminProblemEditor(id) {
     }
     try {
       const r = await api.put(`/api/problems/${id}/testcases`, { testcases: tcs, meta });
-      toast(`已保存 ${r.count} 个测试点`, 'success');
+      // v2.9.3：逐测试点分数合计不是 100 时只提示（仍然保存成功）
+      const extra = saveCaseScores && caseScoresToSave.length
+        ? (caseScoreTotal === 100 ? '，各测试点合计 100 分' : `，各测试点合计 ${caseScoreTotal} 分（建议凑满 100 分）`)
+        : '';
+      toast(`已保存 ${r.count} 个测试点${extra}`, 'success');
       renderAdminProblemEditor(id);
     } catch (e) { toast(e.message, 'error'); }
   });

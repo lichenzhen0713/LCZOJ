@@ -1248,12 +1248,32 @@ const CASE_MEMORY_LIMIT_MIN = 16;
 const CASE_MEMORY_LIMIT_MAX = 1024;
 
 /**
+ * v2.9.3：每个测试点独立满分的归一化。
+ * 规则（站长要求）：长度必须等于测试点数（count 为空表示不校验长度）、每项为 0~100 的整数；
+ * 任一项非法 / 数量不符 → 返回 []（= 不启用逐点计分，继续走子任务逻辑）。
+ * `[]`（空数组）同样返回 []：表示「清除逐点分数、恢复子任务计分」。
+ */
+function normalizeCaseScores(list, count) {
+  if (!Array.isArray(list) || list.length === 0) return [];
+  if (count != null && list.length !== count) return [];
+  const out = [];
+  for (const v of list) {
+    const n = typeof v === 'number' ? v : parseInt(v, 10);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0 || n > 100) return [];
+    out.push(n);
+  }
+  return out;
+}
+
+/**
  * 写入题目的测试数据。
  * cases: [{input, output, subtask, time_limit_ms, memory_limit_mb}]
  *   后两个字段为**点级限额**：留空 = 继承题目级限额（meta 里存 null）。
  * meta: {
  *   subtask_scores: [number],           —— 每个子任务的满分（子任务按出现顺序编号）
  *   subtask_types:  ['sum'|'min'|'max'|'bundle'] —— 每个子任务的计分方式（缺省 bundle）
+ *   case_scores:    [number],           —— v2.9.3：每个测试点的满分（0~100，按 1..N 顺序；
+ *                                          缺省 / 空数组 / 长度不符 = 不启用，仍按子任务计分）
  * }
  * 计分方式：sum=加和（各测试点均分累加）、min=取最小、max=取最大、bundle=捆绑（全对才得分）
  */
@@ -1271,7 +1291,11 @@ function writeTestcases(problemId, cases, meta) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   const subtaskOfCase = [];
-  const subtaskScores = meta && Array.isArray(meta.subtask_scores) ? meta.subtask_scores : null;
+  // v2.9.3 双向联动：**显式提供**子任务分数时按原值保存（每项夹到 0~100 整数），
+  // 不再强制把总和拉回 100 —— 否则后台「子任务 60 + 测试点 10/20/30」保存后会被改成 100，
+  // 导致「保存后回读一致」失败。只有完全没提供时才按旧逻辑平均分配并补齐到 100。
+  const subtaskScoresProvided = !!(meta && Array.isArray(meta.subtask_scores) && meta.subtask_scores.length);
+  const subtaskScores = subtaskScoresProvided ? meta.subtask_scores : null;
   const subtaskTypes = meta && Array.isArray(meta.subtask_types) ? meta.subtask_types : null;
   const subtaskMap = {};
   let nextSubtask = 0;
@@ -1288,11 +1312,18 @@ function writeTestcases(problemId, cases, meta) {
   const numSubtasks = nextSubtask || 1;
   const scores = [];
   for (let i = 0; i < numSubtasks; i++) {
-    scores.push(subtaskScores && subtaskScores[i] != null ? Number(subtaskScores[i]) : Math.floor(100 / numSubtasks));
+    if (subtaskScoresProvided) {
+      const n = Number(subtaskScores[i]);
+      scores.push(Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : Math.floor(100 / numSubtasks));
+    } else {
+      scores.push(Math.floor(100 / numSubtasks));
+    }
   }
-  // 补齐因整除造成的差值到最后一个子任务
-  const sum = scores.reduce((a, b) => a + b, 0);
-  if (sum !== 100 && scores.length) scores[scores.length - 1] += (100 - sum);
+  // 仅在「未提供子任务分数」时补齐因整除造成的差值到最后一个子任务（旧行为）
+  if (!subtaskScoresProvided) {
+    const sum = scores.reduce((a, b) => a + b, 0);
+    if (sum !== 100 && scores.length) scores[scores.length - 1] += (100 - sum);
+  }
   // 计分方式：合法值 sum/min/max/bundle，缺省 bundle；
   // 只有一个子任务时默认 sum（整题按测试点比例给分，更符合常见 OJ 习惯）
   const types = [];
@@ -1306,11 +1337,17 @@ function writeTestcases(problemId, cases, meta) {
     time_limit_ms: normalizeCaseLimit(c && c.time_limit_ms, CASE_TIME_LIMIT_MIN, CASE_TIME_LIMIT_MAX),
     memory_limit_mb: normalizeCaseLimit(c && c.memory_limit_mb, CASE_MEMORY_LIMIT_MIN, CASE_MEMORY_LIMIT_MAX),
   }));
-  fs.writeFileSync(metaPath(dir), JSON.stringify({
+  // v2.9.3：每个测试点的独立满分。请求里**显式给**（哪怕是 []）才写入：
+  //   非空且长度 = 测试点数 → 逐点计分；[] / 长度不符 / 非法值 → 不写该键（走原有子任务逻辑）。
+  const caseScoresProvided = !!(meta && Array.isArray(meta.case_scores));
+  const caseScores = normalizeCaseScores(meta && meta.case_scores, cases.length);
+  const metaObj = {
     subtask_of_case: subtaskOfCase, subtask_scores: scores, subtask_types: types, case_limits: caseLimits,
     // 通信题开关：请求未提供时沿用磁盘旧值（非通信题也用不上，写了无害，且便于题目整体导出/迁移）
     ...mergeCommunicationMeta(meta, oldMeta),
-  }));
+  };
+  if (caseScoresProvided && caseScores.length) metaObj.case_scores = caseScores;
+  fs.writeFileSync(metaPath(dir), JSON.stringify(metaObj));
   // 恢复之前备份的 checker.cpp / interactor.cpp / grader.cpp / *.h（若存在）
   restoreDataFiles(dir, snapshot);
   return { count: cases.length, subtasks: scores, types };
@@ -1382,6 +1419,8 @@ function readTestcases(problemId) {
   // 点级限额（v2.5.3）：meta.case_limits 按测试点顺序存 {time_limit_ms, memory_limit_mb}；
   // 旧题库 / 旧 ZIP 包没有该字段（或长度不足 / 项非法）时一律视为 null = 继承题目级限额，不报错。
   const caseLimits = caseLimitListOf(meta);
+  // v2.9.3：每个测试点的独立满分（按测试点顺序，缺省 / 非法 / 长度不符 → 全部视为「未设置」）
+  const caseScores = normalizeCaseScores(meta && meta.case_scores, nums.length);
   // 子任务编号 0-based（默认题目只有一个子任务 0）
   return nums.map((n, i) => ({
     id: n,
@@ -1390,6 +1429,8 @@ function readTestcases(problemId) {
     subtask: subtaskOfCase[i] != null ? subtaskOfCase[i] : 0,
     time_limit_ms: caseLimitAt(caseLimits[i], 'time_limit_ms'),
     memory_limit_mb: caseLimitAt(caseLimits[i], 'memory_limit_mb'),
+    // v2.9.3：该测试点的独立满分（null = 未启用逐点计分）
+    case_score: caseScores.length ? caseScores[i] : null,
   })).map((c) => ({ ...c, subtask_score: subtaskScores[c.subtask] != null ? subtaskScores[c.subtask] : 0 }));
 }
 
@@ -1432,6 +1473,41 @@ function readSubtaskScores(problemId) {
     const meta = JSON.parse(fs.readFileSync(metaPath(dir), 'utf8'));
     return meta.subtask_scores || [];
   } catch { return []; }
+}
+
+/**
+ * v2.9.3：读取每个测试点的独立满分（meta.json 的 case_scores）。
+ * 只统计测试点个数并校验长度 / 取值范围；缺省、空数组、长度不符或非法值 → []（= 未启用逐点计分）。
+ */
+function readCaseScores(problemId) {
+  const dir = problemDir(problemId);
+  let meta = null;
+  try { meta = JSON.parse(fs.readFileSync(metaPath(dir), 'utf8')); } catch { return []; }
+  return normalizeCaseScores(meta && meta.case_scores, testcaseCount(problemId));
+}
+
+/**
+ * v2.9.3：只读写 meta.json 的 case_scores（不改动测试数据本体）。
+ * scores 为 [] 时删除该键（恢复子任务计分）；其它 meta 字段（子任务分数 / 计分方式 /
+ * 点级限额 / 通信题开关）原样保留。
+ * 返回 { ok, case_scores } 或 { error }；长度校验由调用方（problems.setCaseScores）给出中文提示。
+ */
+function writeCaseScores(problemId, scores) {
+  const dir = problemDir(problemId);
+  let meta = null;
+  try { meta = JSON.parse(fs.readFileSync(metaPath(dir), 'utf8')); } catch { meta = null; }
+  if (!meta || typeof meta !== 'object') return { error: '该题暂无测试数据（缺少 meta.json）' };
+  const list = normalizeCaseScores(scores, testcaseCount(problemId));
+  if (Array.isArray(scores) && scores.length && !list.length) return { error: '每个测试点的分数必须是 0~100 的整数，且个数必须等于测试点数' };
+  if (list.length) meta.case_scores = list;
+  else delete meta.case_scores;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(metaPath(dir), JSON.stringify(meta));
+  } catch (e) {
+    return { error: `写入 meta.json 失败：${e.message}` };
+  }
+  return { ok: true, case_scores: list };
 }
 
 /** 读取子任务计分方式列表（sum/min/max/bundle），缺省 bundle */
@@ -2235,6 +2311,10 @@ module.exports = {
   readCaseLimits,
   readSubtaskScores,
   readSubtaskTypes,
+  // v2.9.3：每个测试点的独立满分（meta.json 的 case_scores）
+  normalizeCaseScores,
+  readCaseScores,
+  writeCaseScores,
   testcaseCount,
   // 通信题（problem_type = 'communication'）：连接方式 / 通信量上限 / duplex 都在 meta.json 里
   readCommunicationConfig,
