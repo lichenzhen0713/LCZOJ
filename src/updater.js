@@ -835,7 +835,12 @@ async function applySourceUpdate() {
           // 4) 删除远端已不存在的**未跟踪**文件；gitignore 的 data/、logs/、.env 等不受影响
           const cl = run('git', ['clean', '-fd']);
           if (cl.code === 0) {
-            const removed = (cl.out || '').split('\n').map((s) => s.replace(/^Removing\s+/, '').trim()).filter(Boolean);
+            // 只认 git clean 真正删除的行（"Removing xxx"）；忽略 warning:/error: 等噪声，避免把警告当成"残留文件"
+            const removed = (cl.out || '').split('\n')
+              .map((s) => s.trim())
+              .filter((s) => /^Removing\s+/.test(s))
+              .map((s) => s.replace(/^Removing\s+/, ''))
+              .filter(Boolean);
             logLine('已清理 ' + removed.length + ' 个远端不存在的残留文件' + (removed.length ? '（示例：' + removed.slice(0, 5).join('、') + (removed.length > 5 ? ' …' : '') + '）' : ''));
           }
           logLine('git 完全覆盖完成');
@@ -1064,7 +1069,7 @@ async function start(opts = {}) {
     let after = CURRENT;
     try { after = require('../package.json').version || CURRENT; } catch { /* ignore */ }
     state.after = after;
-    logLine(`代码更新完成：v${state.before} → v${after}` + (applied.how === 'zip' ? '（源码包覆盖' : '（git pull')
+    logLine(`代码更新完成：v${state.before} → v${after}` + (applied.how === 'zip' ? '（源码包覆盖' : '（git 完全覆盖')
       + unverifiedNote + '）');
 
     if (!restart) {

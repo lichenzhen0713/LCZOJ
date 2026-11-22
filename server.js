@@ -831,6 +831,19 @@ async function handleApi(req, res, url, method, viewer, pathname) {
       const langs = availableLanguages();
       return ok(res, { languages: Object.values(langs).map((l) => ({ key: l.key, name: l.name, available: l.available, highlight: l.highlight })) });
     }
+    // 题目页 IDE 模式：自测运行（必须登录；与正式评测同一套沙箱与限制，见 src/selftest.js / judge.runSelftest）
+    if (seg[0] === 'run' && method === 'POST') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      let body;
+      try { body = await readBody(req); } catch (e) {
+        if (e && (e.http413 || e.status === 413)) throw e;
+        return fail(res, 400, '请求体格式错误');
+      }
+      const r = await require('./src/selftest').handleRun(user, body);
+      if (r.status) return fail(res, r.status, r.message);
+      return ok(res, r.data);
+    }
     if (seg[0] === 'problems' && method === 'GET') {
       // 拥有「题目管理」权限的用户在前台也能看到未公开题目
       const r = problems.listProblems(url.searchParams, viewer && viewer.id, viewer && viewer.is_admin, hasPerm(viewer, 'problem'));

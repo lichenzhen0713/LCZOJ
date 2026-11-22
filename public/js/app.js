@@ -903,6 +903,8 @@ async function refreshBellBadge(force = false) {
 async function route() {
   trackPrevHash();
   renderTopbar();
+  // 离开题目页时清掉 IDE 聚焦态（题目页内的 applyIde 会按需重新加上）
+  document.body.classList.remove('ide-mode');
   const { path, query } = parseHash();
   const parts = path.split('/').filter(Boolean);
   // 每个页面可以有自己的宽度（内置默认 / 后台设置 / 用户自定义），先按路由确定当前页面
@@ -1233,6 +1235,8 @@ function bindCodeCopy(root) {
     try {
       if (pre.dataset.copyBound) return;
       if (pre.closest('.editor-wrap')) return; // 提交代码编辑器的语法高亮覆盖层，不处理
+      // IDE 右栏的「输出」框不挂复制按钮（站长要求只保留样例块上的复制）
+      if (pre.closest('#ide-io-panel')) return;
       // v2.9.0：通信题提交详情里「程序一 / 程序二」各自已有带文字的「复制」按钮（.comm-copy），
       // 再挂这个浮动按钮就重复了（站长反馈"多余的复制按钮"）→ 所属容器已有复制按钮则跳过。
       // 空 <pre>（没有任何可复制文本）不挂按钮：否则会留下「空框 + 浮动复制按钮」的观感
@@ -2140,7 +2144,8 @@ async function renderProblemDetail(id, query) {
     const body = text.trim()
       ? `<pre>${escapeHtml(text)}</pre>`
       : '<div class="sample-empty">（空）</div>';
-    return `<div class="sample-block">
+    const side = label === '输入' ? 'in' : 'out';
+    return `<div class="sample-block" data-sample-idx="${idx}" data-sample-side="${side}">
         <div class="sample-head"><span>${label} #${idx + 1}</span></div>
         ${body}
       </div>`;
@@ -2149,7 +2154,7 @@ async function renderProblemDetail(id, query) {
     const inputText = s && s.input != null ? String(s.input) : '';
     const outputText = s && s.output != null ? String(s.output) : '';
     if (!inputText.trim() && !outputText.trim()) return '';
-    return `<div class="sample-grid">
+    return `<div class="sample-grid" data-sample-grid="${i}">
       ${sampleSide('输入', i, inputText)}
       ${sampleSide('输出', i, outputText)}
     </div>`;
@@ -2200,6 +2205,31 @@ async function renderProblemDetail(id, query) {
   // 下拉框初始选中项：记住的选择优先（'auto' 或具体语言），否则默认「自动识别语言」
   const initialPick = lastPick === 'auto' ? 'auto' : (langExists(lastPick) ? lastPick : 'auto');
   const initialO2Lang = initialPick === 'auto' ? defaultLang : initialPick;
+  /* ---------- IDE 模式（v2.9.7）：草稿与语言记忆 ---------- */
+  // 代码草稿：IDE 编辑器与下方提交卡片的代码框共用同一份，按题目持久化到 localStorage
+  const codeDraftKey = 'lczoj.code.' + p.id;
+  let codeDraft = '';
+  try { codeDraft = localStorage.getItem(codeDraftKey) || ''; } catch { /* ignore */ }
+  const saveCodeDraft = (v) => {
+    const s = String(v == null ? '' : v);
+    // ⚠ 空值不覆盖非空草稿（v2.9.7 修复）：
+    // 编辑器挂载 / 隐藏 / setValue 等**程序化**路径会以空串回调一次，
+    // 若不拦住，用户之前写的代码会被清空（表现：一进 IDE 模式代码就没了）。
+    // 用户真想清空时，先输入任意字符再删空即可，不会触发这条保护。
+    if (!s && codeDraft) return;
+    codeDraft = s;   // 同步内存副本：未登录用户在 IDE 内反复进出时也不会丢代码
+    try { localStorage.setItem(codeDraftKey, codeDraft); } catch { /* ignore */ }
+  };
+  // IDE 里选择的具体语言：下次进入题目页继续用它（自动识别语言只在提交页用，IDE 必须有确定语言才能运行）
+  let ideLang = '';
+  try { ideLang = localStorage.getItem('lczoj_ide_lang') || ''; } catch { /* ignore */ }
+  if (!langExists(ideLang)) ideLang = defaultLang || (availLangs[0] ? availLangs[0].key : '');
+  const ideLangOptions = codeLangs.map((l) =>
+    `<option value="${l.key}" ${l.available ? '' : 'disabled'}>${escapeHtml(l.name)}${l.available ? '' : '（未安装）'}</option>`).join('');
+  const ideO2Allowed = p.enable_o2 !== false;
+  const ideO2Visible = ideO2Allowed && O2_LANGS.includes(ideLang);
+  // 提交答案题没有代码可写；函数式交互题 / 通信题需要 grader 或两个程序，单文件运行没有意义
+  const ideSupported = !outputOnly && !isInteractiveFunc && !isCommunication;
   const langOptions = codeLangs.map((l) =>
     `<option value="${l.key}" ${l.available ? '' : 'disabled'}>${escapeHtml(l.name)}${l.available ? '' : '（未安装）'}</option>`).join('');
   // 「自动识别语言」作为语言下拉里的一项（提交时按代码内容/文件扩展名判断真正使用的语言）
@@ -2210,6 +2240,10 @@ async function renderProblemDetail(id, query) {
   const tagHtml = contestInfo ? '' : `<span>${p.tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('')}${p.source ? `<span class="tag" style="color:var(--accent);border-color:var(--accent)">${escapeHtml(p.source)}</span>` : ''}</span>`;
   const favBtnHtml = Store.user ? `<button class="btn btn-ghost btn-sm" id="fav-btn" title="收藏本题"><i class="fa-${p.is_favorite ? 'solid' : 'regular'} fa-star" style="color:${p.is_favorite ? '#faad14' : ''}"></i>${p.is_favorite ? '已收藏' : '收藏'}</button>` : '';
   const mdCopyBtn = '<button class="btn btn-ghost btn-sm" id="copy-md-btn" title="复制题面为 Markdown（洛谷式）"><i class="fa-solid fa-clipboard"></i>复制 Markdown</button>';
+  // 题目页右上角「进入 / 退出 IDE 模式」（v2.9.7）：宽屏左右分栏，窄屏用「题目 / 代码」两个 chip 切换
+  const ideToggleBtn = ideSupported
+    ? '<button class="btn btn-ghost btn-sm" id="ide-toggle-btn" title="左右分栏：左边看题，右边写代码"><i class="fa-solid fa-code" id="ide-toggle-icon"></i><span id="ide-toggle-label">进入 IDE 模式</span></button>'
+    : '';
 
   // 比赛横幅（含私有题目提示）
   let contestBanner = '';
@@ -2385,6 +2419,56 @@ async function renderProblemDetail(id, query) {
     p.hint ? '<h2>提示</h2>' + p.hint_html : '',
   ].filter(Boolean).join('');
 
+  /* IDE 模式右侧面板（v2.9.7）：工具条（语言 / O2 / 提交）+ 代码编辑器 + 输入 / 输出。
+     编辑器本身用 public/js/editor.js 的零依赖组件（行号栏、语法高亮、Tab / 自动缩进、粘贴优化）。 */
+  const ideTabsHtml = ideSupported ? `
+    <div class="ide-tabs" id="ide-tabs" role="tablist" aria-label="IDE 模式视图切换">
+      <button type="button" class="chip active" data-ide-tab="statement" role="tab" aria-selected="true"><i class="fa-solid fa-book-open"></i> 题目</button>
+      <button type="button" class="chip" data-ide-tab="code" role="tab" aria-selected="false"><i class="fa-solid fa-code"></i> 代码</button>
+    </div>` : '';
+  /* 「输入 / 输出」框（v2.9.7 调整）：位于右侧 IDE 栏、代码编辑器下方；
+     点样例「运行」时自动填入样例输入，并把本次 stdout / 编译错误 / 超时提示同步到「输出」。 */
+  const ideIoHtml = ideSupported ? `
+    <div class="ide-io-panel" id="ide-io-panel">
+      <div class="ide-io-block">
+        <div class="ide-io-head">
+          <span class="ide-label"><i class="fa-solid fa-keyboard"></i> 输入</span>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-ghost btn-sm ide-run-btn" id="ide-run-btn"><i class="fa-solid fa-play"></i>运行</button>
+        </div>
+        <textarea class="textarea mono ide-input" id="ide-input" rows="2" spellcheck="false" placeholder="填写程序的标准输入；也可直接点样例右上角的「运行」自动填入"></textarea>
+      </div>
+      <div class="ide-io-block">
+        <div class="ide-io-head">
+          <span class="ide-label"><i class="fa-solid fa-terminal"></i> 输出</span>
+          <span class="ide-badge" id="ide-status" data-state="idle">等待运行</span>
+          <span class="muted ide-meta" id="ide-meta"></span>
+        </div>
+        <pre class="ide-output" id="ide-output">运行后将在这里显示标准输出、标准错误与编译信息。</pre>
+      </div>
+    </div>` : '';
+  const idePanelHtml = ideSupported ? `
+    <div class="ide-panel" id="ide-panel">
+      <div class="ide-head">
+        <span class="ide-title"><i class="fa-solid fa-code"></i> IDE 模式</span>
+        <span class="muted ide-hint">左边看题 · 右边写代码</span>
+      </div>
+      <div class="ide-toolbar">
+        <label class="ide-lang-field">语言
+          <select class="input" id="ide-lang">${ideLangOptions}</select>
+        </label>
+        <label class="switch" id="ide-o2-wrap" style="${ideO2Visible ? '' : 'display:none'}" title="仅 C/C++ 支持 O2 优化（编译时追加 -O2）">
+          <input type="checkbox" id="ide-o2-check" ${ideO2Allowed ? 'checked' : ''} />
+          <span class="slider"></span>
+          <span class="switch-label">O2 优化</span>
+        </label>
+        <div class="spacer"></div>
+        <button type="button" class="btn btn-sm" id="ide-submit-btn"><i class="fa-solid fa-cloud-arrow-up"></i>提交</button>
+      </div>
+      <div class="ide-editor" id="ide-editor-host"></div>
+      ${ideIoHtml}
+    </div>` : '';
+
   app.innerHTML = `
     <div class="crumb"><a href="${contestInfo ? '#/contest/' + contestInfo.id : '#/problems'}"><i class="fa-solid fa-arrow-left"></i> ${contestInfo ? '返回比赛' : '返回题库'}</a></div>
     <div class="row mt" style="margin-top:8px;align-items:baseline">
@@ -2393,12 +2477,14 @@ async function renderProblemDetail(id, query) {
       <div class="spacer"></div>
       ${favBtnHtml}
       ${mdCopyBtn}
+      ${ideToggleBtn}
       ${adminBtns}
     </div>
     ${contestBanner}
     ${interactiveBanner}
 
-    <div class="contest-grid">
+    <div class="contest-grid" id="contest-grid">
+      ${ideTabsHtml}
       <div class="cg-main">
         <div class="card statement">
           ${statementSections}
@@ -2493,6 +2579,7 @@ async function renderProblemDetail(id, query) {
       <div class="cg-side">
         ${probSide}
       </div>
+      ${idePanelHtml}
     </div>`;
 
   // 提交答案题：答案文件上传评测（拖放区 + 文件信息 + 提交）
@@ -2581,6 +2668,10 @@ async function renderProblemDetail(id, query) {
   }
 
   // 普通提交
+  // IDE 模式要把提交卡片的编辑器 / 语言 / O2 当作「唯一提交入口」复用（见下方 IDE 绑定），先留引用
+  let submitEditorRef = null;
+  let submitLangSelectRef = null;
+  let submitO2CheckRef = null;
   if (Store.user && defaultLang && !p.output_only) {
     const langSelect = document.getElementById('lang-select');
     const langTip = document.getElementById('lang-auto-tip');
@@ -2591,9 +2682,17 @@ async function renderProblemDetail(id, query) {
        与此处的判断口径一致。 */
     const o2Check = document.getElementById('o2-check');
     const o2Allowed = p.enable_o2 !== false;
-    const editor = createEditor(document.getElementById('editor-host'), { language: defaultLang });
+    // value：载入本题草稿（与 IDE 编辑器共用 localStorage 里的同一份）
+    const editor = createEditor(document.getElementById('editor-host'), {
+      language: defaultLang,
+      value: codeDraft,
+      onChange: saveCodeDraft,
+    });
     // 通信题：第二个代码框（程序二）。两者共用上方同一个语言下拉与 O2 开关（评测时分别编译成两个可执行文件）。
     const editor2 = isCommunication ? createEditor(document.getElementById('editor-host2'), { language: defaultLang }) : null;
+    submitEditorRef = editor;
+    submitLangSelectRef = langSelect;
+    submitO2CheckRef = o2Check;
     // 默认选中「上次提交选择的语言」；「自动识别语言」同样会被记住
     langSelect.value = initialPick;
     let autoDetected = '';   // 自动识别出的语言（供提交时使用）
@@ -2949,6 +3048,308 @@ async function renderProblemDetail(id, query) {
         btn.disabled = false;
       }
     });
+  }
+
+  /* ============================================================================
+     IDE 模式（v2.9.7，仿洛谷题目页）
+     - 开关：右上角「进入 / 退出 IDE 模式」，状态存 localStorage（lczoj.ide.on）
+     - 宽屏（≥1000px）：左题面 / 右 IDE 两栏，各自独立滚动
+     - 窄屏（<1000px）：上下堆叠，用「题目 / 代码」两个 chip 切换
+     - 编辑器复用 public/js/editor.js（行号、高亮、Tab 2 空格、自动缩进）
+     - 样例「运行」/ 自定义输入都调用 POST /api/run（服务端走与正式评测同一套沙箱）
+     - 提交复用下方提交卡片的既有逻辑（同步代码 / 语言 / O2 后点击原提交按钮）
+     - 代码草稿与提交卡片共用 localStorage 的 lczoj.code.<题目ID>
+     ========================================================================== */
+  if (ideSupported) {
+    const grid = document.getElementById('contest-grid');
+    const toggleBtn = document.getElementById('ide-toggle-btn');
+    const toggleLabel = document.getElementById('ide-toggle-label');
+    const toggleIcon = document.getElementById('ide-toggle-icon');
+    const ideLangSelect = document.getElementById('ide-lang');
+    const ideO2Wrap = document.getElementById('ide-o2-wrap');
+    const ideO2Check = document.getElementById('ide-o2-check');
+    const ideInput = document.getElementById('ide-input');
+    const ideRunBtn = document.getElementById('ide-run-btn');
+    const ideStatusEl = document.getElementById('ide-status');
+    const ideMetaEl = document.getElementById('ide-meta');
+    const ideOutputEl = document.getElementById('ide-output');
+    const ideSubmitBtn = document.getElementById('ide-submit-btn');
+    let ideOn = false;
+    let sampleRunBusy = false;   // 同一时间只允许一个样例在运行（同时防连点与 /api/run 限流）
+
+    if (ideLangSelect) ideLangSelect.value = ideLang;
+    const ideEditor = createEditor(document.getElementById('ide-editor-host'), {
+      language: ideLang || defaultLang || 'cpp',
+      value: codeDraft,
+      tabSize: 2,
+      onChange: saveCodeDraft,
+    });
+
+    // 输入框记忆（按题目）
+    const ideInputKey = 'lczoj.ide.input.' + p.id;
+    try { ideInput.value = localStorage.getItem(ideInputKey) || ''; } catch { /* ignore */ }
+    ideInput.addEventListener('input', () => {
+      try { localStorage.setItem(ideInputKey, ideInput.value); } catch { /* ignore */ }
+    });
+
+    const setIdeStatus = (state, text) => {
+      if (!ideStatusEl) return;
+      ideStatusEl.dataset.state = state;
+      ideStatusEl.textContent = text;
+    };
+    const syncIdeO2 = () => {
+      if (!ideO2Wrap) return;
+      const show = ideO2Allowed && O2_LANGS.includes(ideLangSelect.value);
+      ideO2Wrap.style.display = show ? '' : 'none';
+    };
+    const refreshIdeEditor = () => {
+      // 面板从 display:none 变成可见后，编辑器的可视高度缓存需要重算一次
+      requestAnimationFrame(() => { try { ideEditor.setValue(ideEditor.getValue()); } catch { /* ignore */ } });
+    };
+
+    const setIdeTab = (tab) => {
+      const isCode = tab === 'code';
+      grid.classList.toggle('ide-tab-code', isCode);
+      grid.classList.toggle('ide-tab-statement', !isCode);
+      document.querySelectorAll('#ide-tabs [data-ide-tab]').forEach((b) => {
+        const active = b.dataset.ideTab === tab;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      if (isCode) refreshIdeEditor();
+    };
+
+    /** 开启 / 退出 IDE 模式：不刷新页面，就地切换；退出时把 IDE 里的代码写回提交卡片 */
+    const applyIde = (on, opts = {}) => {
+      ideOn = !!on;
+      grid.classList.toggle('ide-on', ideOn);
+      document.body.classList.toggle('ide-mode', ideOn);
+      if (toggleLabel) toggleLabel.textContent = ideOn ? '退出 IDE 模式' : '进入 IDE 模式';
+      if (toggleIcon) toggleIcon.className = 'fa-solid ' + (ideOn ? 'fa-right-from-bracket' : 'fa-code');
+      try { localStorage.setItem('lczoj.ide.on', ideOn ? '1' : '0'); } catch { /* ignore */ }
+      if (ideOn) {
+        // 以"更可信"的那份代码为准：提交卡片编辑器有内容就用它；为空时退回内存草稿，
+        // 内存草稿也空时**直接读 localStorage**（权威来源），避免出现"编辑器空白但草稿还在"。
+        const fromSubmit = submitEditorRef ? submitEditorRef.getValue() : '';
+        let code = (fromSubmit && fromSubmit.trim()) ? fromSubmit : (codeDraft || '');
+        if (!code) { try { code = localStorage.getItem(codeDraftKey) || ''; } catch { /* ignore */ } }
+        if (code && code !== codeDraft) saveCodeDraft(code);
+        ideEditor.setValue(code);
+        setIdeTab(opts.initial ? 'statement' : 'code');
+        refreshIdeEditor();
+        scheduleSampleButtons();
+      } else {
+        if (!opts.initial) {
+          const code = ideEditor.getValue();
+          if (code) saveCodeDraft(code);
+          if (submitEditorRef) submitEditorRef.setValue(code);
+        }
+        removeSampleButtons();
+      }
+    };
+
+    toggleBtn.addEventListener('click', () => applyIde(!ideOn));
+    document.querySelectorAll('#ide-tabs [data-ide-tab]').forEach((b) => {
+      b.addEventListener('click', () => setIdeTab(b.dataset.ideTab));
+    });
+
+    ideLangSelect.addEventListener('change', () => {
+      const lang = ideLangSelect.value;
+      ideEditor.setLanguage(lang);
+      try { localStorage.setItem('lczoj_ide_lang', lang); } catch { /* ignore */ }
+      syncIdeO2();
+    });
+    if (ideO2Check) syncIdeO2();
+
+    /* ---------------- 样例「运行」：当前 IDE 代码 + 该样例输入 → /api/run → 比对输出 ---------------- */
+    const normalizeSample = (s) => String(s == null ? '' : s)
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map((line) => line.replace(/[ \t]+$/, ''))
+      .join('\n')
+      .replace(/\n+$/, '');
+    const setSampleButtons = (idx, running) => {
+      document.querySelectorAll('.sample-run-btn').forEach((b) => {
+        b.disabled = running;
+        if (!running) {
+          b.innerHTML = '<i class="fa-solid fa-play"></i>';
+          b.title = '运行此样例';
+        }
+      });
+      if (running) {
+        document.querySelectorAll(`.sample-run-btn[data-sample-run="${idx}"]`).forEach((b) => {
+          b.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+          b.title = '运行中…';
+        });
+      }
+    };
+    const ensureSampleButtons = () => {
+      if (!grid.classList.contains('ide-on')) return;
+      document.querySelectorAll('.sample-block[data-sample-idx]').forEach((block) => {
+        if (block.querySelector('.sample-run-btn')) return;
+        const wrap = block.querySelector('.code-copy-wrap');
+        if (!wrap) return;   // 复制按钮 / 代码块包装尚未挂载（页面首次渲染时由延时重试补齐）
+        const idx = parseInt(block.dataset.sampleIdx, 10);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'code-copy-btn sample-run-btn';
+        btn.dataset.sampleRun = String(idx);
+        btn.title = '运行此样例';
+        btn.setAttribute('aria-label', `运行样例 #${idx + 1}`);
+        btn.innerHTML = '<i class="fa-solid fa-play"></i>';
+        btn.addEventListener('click', () => runSample(idx));
+        wrap.appendChild(btn);
+      });
+    };
+    const scheduleSampleButtons = () => {
+      ensureSampleButtons();
+      setTimeout(ensureSampleButtons, 0);
+      requestAnimationFrame(ensureSampleButtons);
+    };
+    const removeSampleButtons = () => {
+      document.querySelectorAll('.sample-run-btn').forEach((b) => b.remove());
+    };
+
+    const runSample = async (idx) => {
+      if (sampleRunBusy) return;
+      const sample = (p.samples || [])[idx];
+      if (!sample) return;
+      // 点样例运行：右侧「输入」强制填入该样例输入（覆盖原内容）
+      ideInput.value = sample.input == null ? '' : String(sample.input);
+      ideInput.dispatchEvent(new Event('input', { bubbles: true }));
+      if (!Store.user) {
+        setIdeStatus('error', '请先登录');
+        ideMetaEl.textContent = '';
+        ideOutputEl.textContent = '请先登录后再运行样例。';
+        toast('请先登录后再运行样例', 'error');
+        return;
+      }
+      const code = ideEditor.getValue();
+      if (!code.trim()) return toast('代码不能为空', 'error');
+      const language = ideLangSelect.value;
+      if (!availLangs.some((l) => l.key === language)) {
+        return toast('当前环境未安装该语言的工具链，无法运行', 'error');
+      }
+      sampleRunBusy = true;
+      setSampleButtons(idx, true);
+      setIdeStatus('running', '运行中…');
+      ideMetaEl.textContent = '';
+      ideOutputEl.textContent = `正在编译并运行样例 #${idx + 1}…`;
+      try {
+        const payload = { language, code, input: sample.input == null ? '' : String(sample.input), problem_id: p.id };
+        if (ideO2Wrap && ideO2Wrap.style.display !== 'none') payload.enable_o2 = !!ideO2Check.checked;
+        const r = await api.post('/api/run', payload);
+        renderRunResult(r || {});   // 结果只显示在右侧「输出」+ 状态徽章
+        if (!r.compile_error && !r.timed_out && r.ok) {
+          const expected = sample.output == null ? '' : String(sample.output);
+          const actual = r.stdout == null ? '' : String(r.stdout);
+          if (normalizeSample(actual) === normalizeSample(expected)) setIdeStatus('success', '通过');
+          else setIdeStatus('error', '答案错误');
+        }
+      } catch (e) {
+        if (e.status === 401) {
+          setIdeStatus('error', '请先登录');
+          ideMetaEl.textContent = '';
+          ideOutputEl.textContent = '请先登录后再运行样例。';
+          toast('请先登录后再运行样例', 'error');
+        } else if (e.status === 429) {
+          setIdeStatus('warn', '请求过于频繁');
+          ideMetaEl.textContent = '';
+          ideOutputEl.textContent = e.message || '请稍后再试';
+        } else {
+          setIdeStatus('error', '运行失败');
+          ideMetaEl.textContent = '';
+          ideOutputEl.textContent = e.message || '请稍后再试';
+        }
+      } finally {
+        sampleRunBusy = false;
+        setSampleButtons(idx, false);
+      }
+    };
+
+    const renderRunResult = (r) => {
+      let text = '';
+      if (r.compile_error) {
+        text = String(r.compile_error);
+      } else {
+        if (r.stdout) text = String(r.stdout);
+        if (r.stderr) text += (text ? '\n' : '') + '--- 标准错误 ---\n' + String(r.stderr);
+        if (!text) text = '（无输出）';
+        if (r.truncated) text += '\n\n[输出超过 64KB 上限，已截断]';
+      }
+      ideOutputEl.textContent = text;
+      const meta = [];
+      if (r.time_ms > 0) meta.push('用时 ' + fmtDuration(r.time_ms));
+      if (r.memory_kb > 0) meta.push('内存 ' + fmtMem(r.memory_kb, r.memory_sampled !== false));
+      ideMetaEl.textContent = meta.join(' · ');
+      if (r.compile_error) setIdeStatus('error', '编译错误');
+      else if (r.timed_out) setIdeStatus('warn', '超时');
+      else if (!r.ok) setIdeStatus('error', '运行错误');
+      else setIdeStatus(r.truncated ? 'warn' : 'success', r.truncated ? '完成（输出截断）' : '完成');
+    };
+
+    const runIdeSelftest = async () => {
+      if (ideRunBtn.disabled) return;
+      if (sampleRunBusy) return toast('当前有样例正在运行，请稍候', 'info');
+      if (!Store.user) {
+        setIdeStatus('error', '请先登录');
+        ideMetaEl.textContent = '';
+        ideOutputEl.textContent = '请先登录后再运行。';
+        toast('请先登录后再运行', 'error');
+        return;
+      }
+      const code = ideEditor.getValue();
+      if (!code.trim()) return toast('代码不能为空', 'error');
+      const language = ideLangSelect.value;
+      if (!language) return toast('请选择语言', 'error');
+      if (!availLangs.some((l) => l.key === language)) {
+        return toast('当前环境未安装该语言的工具链，无法运行', 'error');
+      }
+      ideRunBtn.disabled = true;
+      sampleRunBusy = true;
+      setSampleButtons(-1, true);
+      setIdeStatus('running', '运行中…');
+      ideMetaEl.textContent = '';
+      ideOutputEl.textContent = '正在编译并运行…';
+      try {
+        const payload = { language, code, input: ideInput.value, problem_id: p.id };
+        if (ideO2Wrap && ideO2Wrap.style.display !== 'none') payload.enable_o2 = !!ideO2Check.checked;
+        const r = await api.post('/api/run', payload);
+        renderRunResult(r || {});
+      } catch (e) {
+        ideOutputEl.textContent = e.message || '运行失败';
+        ideMetaEl.textContent = '';
+        setIdeStatus('error', e.status === 429 ? '请求过于频繁' : '运行失败');
+      } finally {
+        sampleRunBusy = false;
+        setSampleButtons(-1, false);
+        ideRunBtn.disabled = false;
+      }
+    };
+    ideRunBtn.addEventListener('click', runIdeSelftest);
+
+    // 提交：复用提交卡片的既有逻辑（代码 / 语言 / O2 全部同步过去后点原按钮）
+    ideSubmitBtn.addEventListener('click', () => {
+      if (!Store.user) return toast('请先登录后提交', 'error');
+      const submitBtn = document.getElementById('submit-btn');
+      if (!submitBtn) return toast('当前题目暂不支持在线提交', 'error');
+      const code = ideEditor.getValue();
+      if (!code.trim()) return toast('代码不能为空', 'error');
+      saveCodeDraft(code);
+      if (submitEditorRef) submitEditorRef.setValue(code);
+      if (submitLangSelectRef) {
+        submitLangSelectRef.value = ideLangSelect.value;
+        submitLangSelectRef.dispatchEvent(new Event('change'));
+      }
+      if (submitO2CheckRef && ideO2Wrap && ideO2Wrap.style.display !== 'none') {
+        submitO2CheckRef.checked = !!ideO2Check.checked;
+      }
+      submitBtn.click();
+    });
+
+    // 恢复上次的 IDE 开关状态（退出浏览器再回来仍然保持）
+    try { ideOn = localStorage.getItem('lczoj.ide.on') === '1'; } catch { ideOn = false; }
+    applyIde(ideOn, { initial: true });
   }
 
   // 收藏

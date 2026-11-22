@@ -158,6 +158,9 @@ function highlight(code, lang, startState = 0) {
 function createEditor(container, opts = {}) {
   let language = opts.language || 'cpp';
   const onChange = opts.onChange || (() => {});
+  // Tab / 自动缩进的空格数：提交页沿用历史行为 4；题目页 IDE 模式传 2
+  const tabSize = Math.max(1, Math.min(8, parseInt(opts.tabSize, 10) || 4));
+  const indentUnit = ' '.repeat(tabSize);
 
   container.classList.add('editor');
   container.innerHTML = '';
@@ -202,6 +205,8 @@ function createEditor(container, opts = {}) {
   container.appendChild(body);
 
   ta.value = opts.value || '';
+  // 初始值即视为"已回调过"：挂载后的首次 render/sync 不应再以空值回调（见 emitChange）
+  let lastEmitted = ta.value;
 
   /* ---- 阈值与状态 ---- */
   const FULL_HL_CHARS = 8000;    // 超过这个字符数 → 可视区渲染
@@ -430,8 +435,21 @@ function createEditor(container, opts = {}) {
     }, 140);
     if (rafId) return;
     rafId = (typeof requestAnimationFrame === 'function')
-      ? requestAnimationFrame(() => { rafId = 0; render(); onChange(ta.value); })
-      : setTimeout(() => { rafId = 0; render(); onChange(ta.value); }, 16);
+      ? requestAnimationFrame(() => { rafId = 0; render(); emitChange(); })
+      : setTimeout(() => { rafId = 0; render(); emitChange(); }, 16);
+  }
+
+  /**
+   * 只在值**确实变化**时回调 onChange（v2.9.7 修复）。
+   * 编辑器挂载、隐藏/显示、同步滚动等都会触发 render/sync，若每次都用当前值回调，
+   * 在"值还没填好"的时刻（例如题目页先建提交框编辑器、再建 IDE 编辑器）就会用空串回调，
+   * 把调用方存在 localStorage 里的代码草稿覆盖成空 —— 表现为"进入 IDE 模式后代码没了"。
+   */
+  function emitChange() {
+    const v = ta.value;
+    if (v === lastEmitted) return;
+    lastEmitted = v;
+    onChange(v);
   }
 
   /** 滚动：可视区模式下要重画窗口，同样按帧合并 */
@@ -589,13 +607,13 @@ function createEditor(container, opts = {}) {
         const blockStart = v.lastIndexOf('\n', s - 1) + 1;
         const blockEnd = v.indexOf('\n', en) < 0 ? v.length : v.indexOf('\n', en);
         const block = v.slice(blockStart, blockEnd);
-        const shifted = block.split('\n').map((l) => (e.shiftKey ? l.replace(/^ {1,4}/, '') : '    ' + l)).join('\n');
+        const shifted = block.split('\n').map((l) => (e.shiftKey ? l.replace(new RegExp('^ {1,' + tabSize + '}'), '') : indentUnit + l)).join('\n');
         ta.value = v.slice(0, blockStart) + shifted + v.slice(blockEnd);
         ta.setSelectionRange(blockStart, blockStart + shifted.length);
         sync();
         return;
       }
-      ta.setRangeText(e.shiftKey ? '' : '    ', s, en, 'end');
+      ta.setRangeText(e.shiftKey ? '' : indentUnit, s, en, 'end');
       sync();
       return;
     }
@@ -607,7 +625,7 @@ function createEditor(container, opts = {}) {
       const indentMatch = before.slice(lineStart).match(/^[ \t]*/);
       const indent = indentMatch ? indentMatch[0] : '';
       const lastLine = before.slice(lineStart).trimEnd();
-      const extra = /[:{]\s*$/.test(lastLine) ? '    ' : '';
+      const extra = /[:{]\s*$/.test(lastLine) ? indentUnit : '';
       e.preventDefault();
       ta.setRangeText('\n' + indent + extra, s, s, 'end');
       sync();
@@ -626,20 +644,25 @@ function createEditor(container, opts = {}) {
   }
 
   render();
-  onChange(ta.value);
+  // ⚠ 这里**不要**调用 onChange(ta.value)：
+  // 创建编辑器只是"挂载"，不是用户编辑。此时如果代码框的值还没落到调用方期望的内容
+  // （例如题目页先建提交框编辑器、再建 IDE 编辑器，或 textarea 尚未写入初值），
+  // 就会用空串回调把 localStorage 里的题目草稿覆盖成空 ——
+  // 表现为「一进入 IDE 模式，之前在提交框写的代码就没了」。
+  // 用户输入走 input 处理（下方 sync 链路）触发 onChange，setValue 也会触发，已足够。
   syncScroll();
 
   return {
     getValue: () => ta.value,
     setValue(v) {
       ta.value = v;
+      lastEmitted = v;   // 程序化设置不算"用户编辑"，不重复回调（避免用空值覆盖草稿）
       lastFullGutterLines = -1;
       lastWindow = '';
       contentDirty = true;
       needRemetric = false;
       if (rafId) { try { cancelAnimationFrame(rafId); } catch { /* ignore */ } rafId = 0; }
       render();
-      onChange(ta.value);
       syncScroll();
     },
     setLanguage(lang) {

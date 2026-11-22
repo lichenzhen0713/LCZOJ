@@ -6274,3 +6274,201 @@ th.st-problem-th { vertical-align: middle; padding-top: 7px; padding-bottom: 7px
   .uo-timeline { padding-left: 12px; }
   .uo-log::before { left: -18px; }
 }
+
+/* ============================================================================
+   题目页 IDE 模式（v2.9.7，仿洛谷）
+   宽屏：左题面 / 右 IDE 两栏，各自独立滚动；窄屏（<1000px）：上下堆叠 +
+   「题目 / 代码」两个 chip 切换。所有网格子项都 min-width:0，长代码只在
+   编辑器内部横向滚动，不产生页面级横向溢出。
+   v2.9.7 修补：短题面右栏填满视口（底部留 14px），长题面整页滚动；输入 / 输出在
+   右栏编辑器下方左右分栏，样例运行结果只显示在右侧「输出」框，不再有内联结果条。
+   ========================================================================== */
+.ide-tabs { display: none; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ide-panel {
+  display: none; flex-direction: column; gap: 10px; min-width: 0;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px;
+}
+.contest-grid.ide-on { align-items: stretch; }
+.contest-grid.ide-on .cg-side { display: none; }
+.contest-grid.ide-on #submit-card { display: none; }
+.contest-grid.ide-on #ide-panel { display: flex; }
+.contest-grid.ide-on .cg-main { min-width: 0; }
+.contest-grid.ide-on .cg-main > .card { margin-bottom: 0; }
+
+/* ---------- IDE 布局：页面固定视口，左栏独立滚动，右栏固定高度 ---------- */
+body.ide-mode .footer { display: none !important; }
+body.ide-mode .layout { min-height: 100vh; }
+body.ide-mode .main {
+  height: 100vh;
+  min-height: 0;
+  padding-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+}
+body.ide-mode .main > * {
+  flex: 0 0 auto;
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+body.ide-mode .main > .contest-grid.ide-on {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 16px 0 0 !important;
+}
+/* 左栏：外层卡片固定、四角圆角完整；内部题面滚动容器负责滚动 */
+body.ide-mode .contest-grid.ide-on .cg-main {
+  display: block;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+body.ide-mode .contest-grid.ide-on .cg-main > .card.statement {
+  height: 100%;
+  margin: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overscroll-behavior: contain;
+}
+/* 右栏：固定高度，自身绝不滚动；编辑器 flex:1、内部自行滚动 */
+.contest-grid.ide-on #ide-panel {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px 12px 14px;
+}
+
+/* ---------- IDE 工具条 / 编辑器 ---------- */
+.ide-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ide-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 14px; }
+.ide-hint { font-size: 12px; }
+.ide-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ide-lang-field { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-light); white-space: nowrap; }
+.ide-lang-field select.input { width: auto; max-width: 190px; min-width: 120px; padding: 6px 10px; font-size: 13px; }
+#ide-editor-host { flex: 1 1 auto; min-height: 220px; display: flex; flex-direction: column; min-width: 0; }
+#ide-editor-host .editor-body { flex: 1 1 auto; min-height: 0; }
+#ide-editor-host .editor-wrap pre,
+#ide-editor-host .editor-wrap textarea { tab-size: 2; -moz-tab-size: 2; }
+#ide-editor-host .editor-wrap textarea { height: 100%; min-height: 220px; }
+
+/* ---------- 输入 / 输出（右侧 IDE 栏、编辑器下方；左右分栏） ---------- */
+.ide-io-panel {
+  display: none;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 8px 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.contest-grid.ide-on .ide-io-panel { display: grid; flex: 0 0 auto; }
+.ide-io-block { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ide-io-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 26px; }
+/* 「运行」按钮与输入框同一套小尺寸样式（不再是大块蓝色按钮） */
+.ide-io-head .ide-run-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 6px;
+  box-shadow: none;
+}
+.ide-io-head .ide-run-btn i { font-size: 11px; }
+
+.ide-section-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ide-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.ide-input { flex: 0 0 110px; width: 100%; height: 110px; min-height: 110px; max-height: 110px; resize: none; }
+.ide-output {
+  flex: 0 0 120px;
+  height: 120px;
+  margin: 0; min-height: 120px; max-height: 120px; overflow: auto;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--card); color: var(--text);
+  font-family: "SF Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+  font-size: 13px; line-height: 1.6;
+  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+}
+.ide-badge {
+  display: inline-flex; align-items: center; padding: 1px 9px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; line-height: 1.7; color: #fff; background: #8c8c8c;
+}
+.ide-badge[data-state="idle"] { background: #8c8c8c; }
+.ide-badge[data-state="running"] { background: var(--accent); }
+.ide-badge[data-state="success"] { background: var(--green); }
+.ide-badge[data-state="warn"] { background: var(--orange); }
+.ide-badge[data-state="error"] { background: var(--red); }
+.ide-meta { font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* ---------- 样例「运行」按钮 ---------- */
+/* 与「复制」完全同尺寸的图标按钮，紧挨在复制左侧（顺序：运行、复制） */
+.sample-block .code-copy-wrap > .code-copy-btn {
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.code-copy-wrap > .sample-run-btn { right: 44px; }
+.code-copy-wrap > .sample-run-btn:disabled { opacity: .55; cursor: wait; }
+.sample-block pre { min-height: 56px; max-height: 240px; }
+.sample-block .sample-empty { min-height: 56px; display: flex; align-items: center; justify-content: center; }
+
+@media (min-width: 1000px) {
+  .contest-grid.ide-on {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+@media (max-width: 999px) {
+  .contest-grid.ide-on {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  /* IDE 聚焦模式：窄屏隐藏右下角悬浮的铃铛 / 私信 / 主题 / 头像竖列，避免盖住「运行」与输出区 */
+  body.ide-mode .side-nav > .nav-actions { display: none !important; }
+  .contest-grid.ide-on .ide-tabs {
+    display: flex; position: sticky; top: 0; z-index: 20;
+    padding: 6px 0; background: var(--bg);
+  }
+  .contest-grid.ide-on.ide-tab-statement .cg-main { display: flex; }
+  .contest-grid.ide-on.ide-tab-statement #ide-panel { display: none; }
+  body.ide-mode .contest-grid.ide-on.ide-tab-code .cg-main { display: none !important; }
+  .contest-grid.ide-on.ide-tab-code #ide-panel { display: flex; }
+}
+@media (max-width: 760px) {
+  /* 手机端底部导航条是 fixed 的：正文留出导航条高度 + 与底部的 14px 空隙 */
+  body.ide-mode .main { padding-bottom: 73px !important; }
+  /* 站内移动端默认把 .contest-grid 改成 display:block!important（普通页面单列堆叠）；
+     IDE 模式必须恢复 grid，否则两栏不拉伸、底部留空白 */
+  body.ide-mode .contest-grid.ide-on { display: grid !important; }
+  body.ide-mode .contest-grid.ide-on > * { margin-bottom: 0 !important; }
+}
+@media (max-width: 699px) {
+  /* 窄屏：输入 / 输出上下堆叠；右栏固定高度内完整容纳工具条 / 编辑器 / 输入 / 输出，不裁切 */
+  .ide-io-panel { grid-template-columns: 1fr; }
+  #ide-panel { padding: 8px 10px 14px; gap: 6px; }
+  .ide-head { display: none; }
+  #ide-editor-host { min-height: 160px; }
+  #ide-editor-host .editor-wrap textarea { min-height: 120px; }
+}
+@media (max-width: 640px) {
+  .ide-toolbar { gap: 6px; }
+  .ide-lang-field select.input { max-width: 150px; }
+  .ide-hint { display: none; }
+}

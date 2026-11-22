@@ -439,9 +439,9 @@ function problemWithCaseLimits(problem, testcase) {
  * 其它平台：用 /usr/bin/time -v 采样最大驻留内存；不可用时退回纯 shell 运行（内存记 0）。
  * 返回 { code, timedOut, durationMs, memoryKb, error }。
  */
-function runMeasured(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, stderrFile, dropPriv }) {
-  if (process.platform === 'win32') return runMeasuredWindows(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, stderrFile });
-  return runMeasuredUnix(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, stderrFile, dropPriv });
+function runMeasured(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, stderrFile, dropPriv, outputLimitBytes }) {
+  if (process.platform === 'win32') return runMeasuredWindows(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, stderrFile, outputLimitBytes });
+  return runMeasuredUnix(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, stderrFile, dropPriv, outputLimitBytes });
 }
 
 function runMeasuredWindows(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, stderrFile, outputLimitBytes }) {
@@ -1149,8 +1149,12 @@ async function runMeasuredNode(exe, args, { cwd, timeoutMs, stdinFile, stdoutFil
   let timedOut = false;
   let outputExceeded = false;
   let stopWatch = null;
+  let spawnWaitMs = 0;
   try {
     child = spawn(exe, args || [], judgeSpawnOpts({ cwd, stdio: [fdIn, fdOut, fdErr], windowsHide: true, detached: process.platform !== 'win32' }, dropPriv));
+    // 进程创建耗时（Windows 上杀软可能对新编译的可执行文件做数秒的扫描/模拟执行）。
+    // 单独记下来，调用方可据此把「程序本身用时」与「创建进程用时」分开（自测页展示用）。
+    spawnWaitMs = Number(process.hrtime.bigint() - t0) / 1e6;
   } catch (e) {
     try { fs.closeSync(fdIn); fs.closeSync(fdOut); fs.closeSync(fdErr); } catch { /* ignore */ }
     return { code: -1, timedOut: false, durationMs: 0, memoryKb: 0, memorySampled: false, error: '启动失败：' + e.message };
@@ -1201,10 +1205,11 @@ async function runMeasuredNode(exe, args, { cwd, timeoutMs, stdinFile, stdoutFil
   }
   // spawnError：进程**没能启动**时的系统错误（EPERM/ENOENT…），与 error 分开保存，
   // 既有调用方的判定逻辑不受影响；SPJ 侧用它诊断「退出码 -1」并决定是否重试。
-  return { code, timedOut, durationMs, memoryKb, memorySampled, outputExceeded, error: '', spawnError };
+  // spawnWaitMs：仅自测页用来从总耗时里扣除「创建进程（含杀软扫描）」的时间，既有调用方忽略它。
+  return { code, timedOut, durationMs, memoryKb, memorySampled, outputExceeded, error: '', spawnError, spawnWaitMs };
 }
 
-function runMeasuredUnix(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, stderrFile, dropPriv }) {  return new Promise((resolve) => {
+function runMeasuredUnix(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, stderrFile, dropPriv, outputLimitBytes }) {  return new Promise((resolve) => {
     const timeLog = path.join(cwd, '_time.log');
     // 尝试用 /usr/bin/time -v 采样内存
     const hasTime = (() => { try { return spawnSync('/usr/bin/time', ['--version'], { stdio: 'ignore' }).status === 0; } catch { return false; } })();
@@ -1221,11 +1226,14 @@ function runMeasuredUnix(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, std
     const start = process.hrtime.bigint();
     let child = null;
     let timedOut = false;
+    let outputExceeded = false;
+    let stopWatch = null;
     let settled = false;
     const finish = (obj) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (stopWatch) stopWatch();
       let memoryKb = 0;
       if (hasTime) {
         try {
@@ -1241,6 +1249,7 @@ function runMeasuredUnix(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, std
         memoryKb,
         // M7：POSIX 用 /usr/bin/time -v 采样；拿不到就标记为「未采样」，不再静默当成 0
         memorySampled: hasTime && memoryKb > 0,
+        outputExceeded,
         error: obj.error || '',
       });
     };
@@ -1255,6 +1264,17 @@ function runMeasuredUnix(exe, args, { cwd, timeoutMs, stdinFile, stdoutFile, std
     }, timeoutMs);
     // POSIX：独立进程组 + 独立跑，便于整组结束（L7）
     try { child = spawn(full, judgeSpawnOpts({ cwd, shell: true, stdio: 'ignore', windowsHide: true, detached: true }, dropPriv)); } catch (e) { finish({ error: e.message }); return; }
+    // 输出上限（自测运行用）：与 Windows 包装器一致，超限立即结束进程树。
+    // 未传 outputLimitBytes 时行为与历史完全一致（不启动看门狗）。
+    if (stdoutFile && outputLimitBytes) {
+      stopWatch = startOutputWatch(stdoutFile, outputLimitBytes, () => {
+        outputExceeded = true;
+        if (child && child.pid && child.exitCode === null && child.signalCode === null) {
+          try { process.kill(-child.pid, 'SIGKILL'); } catch { /* ignore */ }
+          try { child.kill('SIGKILL'); } catch { /* ignore */ }
+        }
+      });
+    }
     child.on('error', (e) => finish({ error: e.message }));
     child.on('close', (code) => finish({ code }));
   });
@@ -3285,6 +3305,147 @@ function pruneGoCache(maxMb = 300, maxAgeDays = 7) {
   return { removed, freedBytes: freed, sizeBytes };
 }
 
+/* ---------------- 题目页 IDE 模式：自测运行（POST /api/run） ----------------
+ * 与正式评测**同一套沙箱**：
+ *   · 工作目录在 data/judge/selftest-<随机>，走 ensureNoReparse / ensurePrivDir；
+ *   · 编译走 compile()，运行命令走 buildRunCommand()，执行走 runMeasured()（Windows 为
+ *     runMeasuredNode 快速通道，与 judgeSubmission 的批量执行是同一实现），且 dropPriv=true；
+ *   · 不直接 spawn 选手代码、不读写 data/testdata。
+ * 限制：墙钟 ≤ 5s、内存 ≤ 256MB、输出 64KB 截断。运行结束（含异常）在 finally 里删目录。
+ * 返回 { ok, compile_error?, stdout, stderr, code, time_ms, memory_kb, timed_out, truncated }。
+ */
+const SELFTEST_MAX_TIME_MS = 5000;
+const SELFTEST_MAX_MEMORY_KB = 256 * 1024;
+const SELFTEST_MAX_OUTPUT_BYTES = 64 * 1024;
+const SELFTEST_COMPILE_LOG_CHARS = 8000;
+
+/** 删除自测目录：Windows 上进程刚退出时偶发文件占用，退避重试；仍失败则留给定期清理。 */
+async function removeSelftestDir(dir) {
+  for (let i = 0; i < 6; i++) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); return true; } catch { /* retry */ }
+    await new Promise((r) => setTimeout(r, 100 + i * 120));
+  }
+  console.warn('[judge] 自测工作目录清理失败（将由定期清理回收）：' + dir);
+  return false;
+}
+
+async function runSelftest(language, code, input, opts = {}) {
+  const lang = availableLanguages()[language];
+  if (!lang) return { ok: false, error: '不支持该语言' };
+  if (!lang.available) return { ok: false, error: `当前环境未安装 ${lang.toolName} 工具链，无法运行 ${lang.name}` };
+  if (lang.outputOnly || !lang.run) return { ok: false, error: '该语言不支持自测运行' };
+  const o2 = opts.o2 !== false;
+  // 时限：调用方按题目时限传入，但绝不超过 5 秒墙钟（问题页 IDE 的硬上限）
+  const timeLimitMs = Math.max(100, Math.min(SELFTEST_MAX_TIME_MS, Math.round(Number(opts.timeLimitMs) || SELFTEST_MAX_TIME_MS)));
+  const dir = path.join(JUDGE_DIR, 'selftest-' + crypto.randomBytes(10).toString('hex'));
+  let sampler = null;
+  try {
+    ensureNoReparse(dir);
+    fs.mkdirSync(dir, { recursive: true });
+    ensurePrivDir(dir);
+
+    const srcName = lang.srcName || 'main';
+    const srcFile = path.join(dir, `${srcName}.${lang.ext}`);
+    fs.writeFileSync(srcFile, String(code == null ? '' : code));
+    if (lang.key === 'go') {
+      try {
+        fs.writeFileSync(path.join(dir, 'go.mod'), 'module lczoj\n\ngo 1.21\n');
+        fs.mkdirSync(path.join(DATA_DIR, 'gocache'), { recursive: true });
+        fs.mkdirSync(path.join(DATA_DIR, 'gopath'), { recursive: true });
+      } catch { /* ignore */ }
+    }
+
+    let exeFile = srcFile;
+    if (lang.compiled) {
+      const cres = await compile(lang, dir, srcFile, o2);
+      if (!cres.ok) {
+        return {
+          ok: false,
+          compile_error: String(cres.log || '编译失败').slice(0, SELFTEST_COMPILE_LOG_CHARS),
+          stdout: '', stderr: '', code: -1, time_ms: 0, memory_kb: 0, timed_out: false, truncated: false,
+        };
+      }
+      exeFile = cres.exeFile;
+    }
+
+    const inputFile = workFileOf(dir, 'input.txt');
+    const outputFile = workFileOf(dir, 'output.txt');
+    const errorFile = workFileOf(dir, 'error.txt');
+    fs.writeFileSync(inputFile, String(input == null ? '' : input));
+    const { exe, args } = buildRunCommand(lang, dir, srcFile, exeFile);
+
+    let r;
+    if (process.platform === 'win32') {
+      // Windows 快速通道：Node 直跑 + 常驻内存采样器（与 judgeSubmission 的批量执行同一实现）
+      try { sampler = await acquireSampler(400); } catch { sampler = null; }
+      r = await runMeasuredNode(exe, args, {
+        cwd: workDirOf(dir),
+        timeoutMs: timeLimitMs,
+        stdinFile: inputFile,
+        stdoutFile: outputFile,
+        stderrFile: errorFile,
+        sampler,
+        outputLimitBytes: SELFTEST_MAX_OUTPUT_BYTES,
+        dropPriv: true,
+      });
+    } else {
+      // POSIX：/usr/bin/time 采样内存；dropPriv 让选手程序以 OJ_JUDGE_USER 身份运行
+      r = await runMeasured(exe, args, {
+        cwd: workDirOf(dir),
+        timeoutMs: timeLimitMs,
+        stdinFile: inputFile,
+        stdoutFile: outputFile,
+        stderrFile: errorFile,
+        dropPriv: true,
+        outputLimitBytes: SELFTEST_MAX_OUTPUT_BYTES,
+      });
+    }
+
+    const outSize = (() => { try { return fs.statSync(outputFile).size; } catch { return 0; } })();
+    const truncated = outSize > SELFTEST_MAX_OUTPUT_BYTES || !!r.outputExceeded;
+    const stdout = readFileHead(outputFile, SELFTEST_MAX_OUTPUT_BYTES);
+    let stderr = readFileHead(errorFile, SELFTEST_MAX_OUTPUT_BYTES);
+    const memoryKb = r.memoryKb || 0;
+    const memoryExceeded = memoryKb > SELFTEST_MAX_MEMORY_KB;
+    let ok = true;
+    if (r.error || r.spawnError) {
+      ok = false;
+      stderr = (stderr ? stderr + '\n' : '') + '运行失败：' + (r.spawnError || r.error);
+    } else if (r.timedOut) {
+      ok = false;
+      stderr = (stderr ? stderr + '\n' : '') + `运行超时（时限 ${(timeLimitMs / 1000).toFixed(timeLimitMs % 1000 ? 1 : 0)} 秒，已强制结束）`;
+    } else if (memoryExceeded) {
+      ok = false;
+      stderr = (stderr ? stderr + '\n' : '') + `内存超限（限制 256 MB，实测 ${(memoryKb / 1024).toFixed(1)} MB）`;
+    } else if (r.code !== 0 && !truncated) {
+      ok = false;
+      if (!String(stderr).trim()) stderr = `程序异常退出（退出码 ${r.code}）`;
+    }
+    return {
+      ok,
+      stdout,
+      stderr,
+      code: r.code,
+      // 只报「程序本身」的用时：扣除进程创建耗时（Windows 杀软扫描新编译的 exe 可能占数秒），
+      // 这样自测页的「用时」与正式评测的判定口径一致，也不会让人误以为程序跑了 10 秒。
+      time_ms: Math.round(Math.max(0, (r.durationMs || 0) - (r.spawnWaitMs || 0))),
+      memory_kb: memoryKb,
+      memory_sampled: !!r.memorySampled,
+      timed_out: !!r.timedOut,
+      truncated,
+      memory_exceeded: memoryExceeded,
+    };
+  } catch (e) {
+    return {
+      ok: false, error: '自测运行失败：' + (e && e.message ? e.message : e),
+      stdout: '', stderr: '', code: -1, time_ms: 0, memory_kb: 0, timed_out: false, truncated: false,
+    };
+  } finally {
+    if (sampler) { try { releaseSampler(sampler); } catch { /* ignore */ } }
+    await removeSelftestDir(dir);
+  }
+}
+
 module.exports = {
   availableLanguages,
   resetLanguageCache,
@@ -3293,6 +3454,11 @@ module.exports = {
   normalizeOutput,
   JudgeQueue,
   judgeSubmission,
+  // 题目页 IDE 模式：自测运行（与正式评测同一套沙箱）
+  runSelftest,
+  SELFTEST_MAX_TIME_MS,
+  SELFTEST_MAX_MEMORY_KB,
+  SELFTEST_MAX_OUTPUT_BYTES,
   cleanJudgeWorkDirs,
   cleanSpjCache,
   pruneSpjCache,
